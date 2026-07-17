@@ -20,7 +20,7 @@ python pipeline.py run
 `.env` 中至少填写：
 
 - `GITHUB_TOKEN`：只读 GitHub Token；
-- `GITHUB_REPOSITORIES`：逗号分隔的 `owner/repo` 白名单；
+- `GITHUB_REPOSITORIES`：可选的首次初始化白名单，仅在仓库表为空时导入；
 - `DATABASE_URL`：MySQL SQLAlchemy URL；
 - `DEEPSEEK_API_KEY`：执行标注时需要。
 
@@ -39,7 +39,28 @@ python pipeline.py build-corpus   只构建/更新语料
 python pipeline.py label          只标注未成功标注的语料
 python pipeline.py run            串联第一阶段流水线
 python pipeline.py status         查询最近 10 次运行
+python pipeline.py repo list      查询仓库白名单
+python pipeline.py repo add owner/repo       添加并启用仓库
+python pipeline.py repo enable owner/repo    重新启用仓库
+python pipeline.py repo disable owner/repo   停用仓库并保留历史数据
 ```
+
+## 仓库白名单
+
+`repositories` 表是运行期仓库白名单的唯一数据源。`init-db` 仅在该表完全为空时，把
+`.env` 中的 `GITHUB_REPOSITORIES` 导入一次；以后修改 `.env` 不会覆盖数据库状态。
+
+日常通过命令管理：
+
+```bash
+python pipeline.py repo list
+python pipeline.py repo add rust-lang/rust
+python pipeline.py repo disable rust-lang/rust
+python pipeline.py repo enable rust-lang/rust
+```
+
+停用不会删除仓库、游标或历史语料，只会让后续采集跳过该仓库。每次采集启动时读取一次
+所有 `enabled=1` 的仓库，作为本次运行的白名单快照。
 
 ## 增量与恢复语义
 

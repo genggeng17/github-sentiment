@@ -6,6 +6,14 @@ from dataclasses import dataclass
 from dotenv import load_dotenv
 
 
+def normalize_repository_name(value: str) -> str:
+    full_name = value.strip()
+    parts = full_name.split("/")
+    if len(parts) != 2 or not all(parts):
+        raise ValueError(f"仓库名必须为 owner/repo 格式: {value!r}")
+    return full_name
+
+
 def _positive_int(name: str, default: int) -> int:
     raw = os.getenv(name, str(default))
     try:
@@ -38,14 +46,11 @@ class Settings:
         load_dotenv()
         repos = tuple(
             dict.fromkeys(
-                item.strip()
+                normalize_repository_name(item)
                 for item in os.getenv("GITHUB_REPOSITORIES", "").split(",")
                 if item.strip()
             )
         )
-        invalid = [name for name in repos if name.count("/") != 1]
-        if invalid:
-            raise ValueError(f"仓库名必须为 owner/repo 格式: {', '.join(invalid)}")
         return cls(
             database_url=os.getenv(
                 "DATABASE_URL",
@@ -71,8 +76,6 @@ class Settings:
     def require_collection(self) -> None:
         if not self.github_token:
             raise ValueError("采集需要设置 GITHUB_TOKEN")
-        if not self.repositories:
-            raise ValueError("采集需要设置 GITHUB_REPOSITORIES")
 
     def require_labeling(self) -> None:
         if not self.deepseek_api_key:

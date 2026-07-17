@@ -7,7 +7,7 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
-from config import Settings
+from config import Settings, normalize_repository_name
 from corpus_builder import CorpusBuilder
 from crawler import GitHubClient, GitHubCollector
 from llm_labeler.service import DeepSeekClient, DeepSeekLabeler
@@ -24,6 +24,9 @@ class Pipeline:
 
     def collect(self, run_id: str) -> dict[str, Any]:
         self.settings.require_collection()
+        enabled_repositories = self.storage.enabled_repository_names()
+        if not enabled_repositories:
+            raise ValueError("没有启用的采集仓库，请先执行: python pipeline.py repo add owner/repo")
         repositories: dict[str, Any] = {}
         with GitHubClient(
             self.settings.github_token,
@@ -37,7 +40,7 @@ class Pipeline:
                 self.storage,
                 cursor_overlap_seconds=self.settings.cursor_overlap_seconds,
             )
-            for full_name in self.settings.repositories:
+            for full_name in enabled_repositories:
                 logger.info("开始采集 %s", full_name)
                 repositories[full_name] = collector.collect_repository(
                     full_name,
@@ -116,6 +119,15 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--skip-label", action="store_true", help="跳过 DeepSeek 标注")
     status = subparsers.add_parser("status", help="查询最近运行记录")
     status.add_argument("--limit", type=int, default=10)
+    repo = subparsers.add_parser("repo", help="管理数据库中的仓库白名单")
+    repo_commands = repo.add_subparsers(dest="repo_command", required=True)
+    repo_commands.add_parser("list", help="列出全部仓库及启用状态")
+    repo_add = repo_commands.add_parser("add", help="添加仓库并启用")
+    repo_add.add_argument("full_name", help="owner/repo")
+    repo_enable = repo_commands.add_parser("enable", help="重新启用已有仓库")
+    repo_enable.add_argument("full_name", help="owner/repo")
+    repo_disable = repo_commands.add_parser("disable", help="停用仓库但保留历史数据")
+    repo_disable.add_argument("full_name", help="owner/repo")
     return parser
 
 
@@ -131,10 +143,26 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "init-db":
         storage.create_schema()
-        print("数据库表已创建")
+        imported = storage.bootstrap_repositories(settings.repositories)
+        print(f"数据库表已创建；首次导入仓库数: {imported}")
         return 0
     if args.command == "status":
         print(json.dumps(storage.recent_runs(max(1, args.limit)), ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "repo":
+        if args.repo_command == "list":
+            print(json.dumps(storage.list_repositories(), ensure_ascii=False, indent=2))
+            return 0
+        full_name = normalize_repository_name(args.full_name)
+        if args.repo_command == "add":
+            repository_id = storage.ensure_repository(full_name)
+            print(f"仓库已添加并启用: {full_name} (id={repository_id})")
+            return 0
+        enabled = args.repo_command == "enable"
+        changed = storage.set_repository_enabled(full_name, enabled)
+        state = "启用" if enabled else "停用"
+        suffix = "" if changed else "（状态未变化）"
+        print(f"仓库已{state}: {full_name}{suffix}")
         return 0
 
     callbacks: dict[str, Callable[[str], dict[str, Any]]] = {

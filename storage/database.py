@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Engine, Select, create_engine, select, text, update
+from sqlalchemy import Engine, Select, create_engine, func, select, text, update
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import sessionmaker
@@ -71,6 +71,48 @@ class Storage:
             session.add(repository)
             session.flush()
             return repository.id
+
+    def bootstrap_repositories(self, full_names: Iterable[str]) -> int:
+        """仅当仓库表为空时导入环境变量中的初始白名单。"""
+        names = tuple(dict.fromkeys(full_names))
+        if not names:
+            return 0
+        with self.sessions.begin() as session:
+            existing_count = session.scalar(select(func.count()).select_from(Repository)) or 0
+            if existing_count:
+                return 0
+            session.add_all(Repository(full_name=name, enabled=True) for name in names)
+        return len(names)
+
+    def list_repositories(self, *, enabled_only: bool = False) -> list[dict[str, Any]]:
+        query = select(Repository).order_by(Repository.full_name)
+        if enabled_only:
+            query = query.where(Repository.enabled.is_(True))
+        with self.sessions() as session:
+            rows = session.scalars(query).all()
+            return [
+                {
+                    "id": row.id,
+                    "full_name": row.full_name,
+                    "enabled": row.enabled,
+                    "created_at": row.created_at.isoformat(),
+                    "updated_at": row.updated_at.isoformat(),
+                }
+                for row in rows
+            ]
+
+    def enabled_repository_names(self) -> list[str]:
+        return [row["full_name"] for row in self.list_repositories(enabled_only=True)]
+
+    def set_repository_enabled(self, full_name: str, enabled: bool) -> bool:
+        with self.sessions.begin() as session:
+            repository = session.scalar(select(Repository).where(Repository.full_name == full_name))
+            if repository is None:
+                raise ValueError(f"仓库不在白名单中: {full_name}")
+            changed = repository.enabled != enabled
+            repository.enabled = enabled
+            repository.updated_at = utcnow()
+            return changed
 
     def get_cursor(self, repository_id: int, stream: str) -> datetime | None:
         with self.sessions() as session:
