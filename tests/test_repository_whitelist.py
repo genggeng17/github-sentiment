@@ -96,3 +96,24 @@ def test_collection_uses_enabled_database_repositories_not_environment(monkeypat
     result = Pipeline(settings, FakeStorage()).collect("run-id")
     assert collected == ["database/repository"]
     assert result["failed_streams"] == 0
+
+
+def test_run_skips_downstream_steps_when_collection_is_partial(monkeypatch):
+    settings = Settings(
+        database_url="sqlite://",
+        github_token="token",
+        repositories=(),
+    )
+    value = Pipeline(settings, object())
+    monkeypatch.setattr(value, "collect", lambda _run_id: {"failed_streams": 1})
+    monkeypatch.setattr(
+        value,
+        "build_corpus",
+        lambda: pytest.fail("partial collection must not build corpus"),
+    )
+    monkeypatch.setattr(
+        value,
+        "label",
+        lambda: pytest.fail("partial collection must not start labeling"),
+    )
+    assert value.run_all("run-id") == {"collection": {"failed_streams": 1}}

@@ -7,7 +7,17 @@ from sqlalchemy.schema import CreateTable
 
 from corpus_builder import CorpusBuilder
 from storage import Storage
-from storage.models import Base, Corpus, Issue, LlmAnnotation, PipelineRun, PullRequestComment
+from storage.database import MissingParentError
+from storage.models import (
+    Base,
+    Corpus,
+    Issue,
+    IssueComment,
+    LlmAnnotation,
+    PipelineRun,
+    PullRequestComment,
+    RepositoryCursor,
+)
 
 
 @pytest.fixture
@@ -94,6 +104,55 @@ def test_raw_upserts_are_idempotent(storage):
         assert session.scalar(select(func.count()).select_from(Issue)) == 1
         assert session.scalar(select(func.count()).select_from(PullRequestComment)) == 2
     assert storage.classify_parent_numbers(repository_id, {1, 2}) == ({1}, {2})
+
+
+def test_schema_upgrade_keeps_existing_raw_rows(storage):
+    seed_sources(storage)
+    storage.create_schema()
+    with storage.sessions() as session:
+        assert session.scalar(select(func.count()).select_from(Issue)) == 1
+        assert session.scalar(select(func.count()).select_from(PullRequestComment)) == 2
+
+
+def test_page_data_and_cursor_commit_atomically(storage):
+    repository_id = storage.ensure_repository("rust-lang/rust")
+    cursor = datetime(2025, 1, 2)
+    written = storage.commit_collection_page(
+        repository_id,
+        "issues_and_pull_requests",
+        cursor,
+        issues=[
+            {
+                **common(),
+                "github_id": 10,
+                "number": 1,
+                "title": "Issue",
+                "state": "open",
+                "closed_at": None,
+            }
+        ],
+    )
+    assert written == 1
+    assert storage.get_cursor(repository_id, "issues_and_pull_requests") == cursor
+    with storage.sessions() as session:
+        assert session.scalar(select(func.count()).select_from(Issue)) == 1
+        assert session.scalar(select(func.count()).select_from(RepositoryCursor)) == 1
+
+
+def test_missing_parent_rolls_back_page_and_cursor_together(storage):
+    repository_id = storage.ensure_repository("rust-lang/rust")
+    with pytest.raises(MissingParentError):
+        storage.commit_collection_page(
+            repository_id,
+            "issue_comments",
+            datetime(2025, 1, 2),
+            issue_comments=[
+                {**common(), "github_id": 30, "parent_number": 999}
+            ],
+        )
+    with storage.sessions() as session:
+        assert session.scalar(select(func.count()).select_from(IssueComment)) == 0
+        assert session.scalar(select(func.count()).select_from(RepositoryCursor)) == 0
 
 
 def test_builds_all_four_raw_kinds_into_five_corpus_sources(storage):

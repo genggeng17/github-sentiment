@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import Engine, Select, create_engine, func, select, text, update
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from .models import (
     Base,
@@ -23,6 +23,7 @@ from .models import (
     Repository,
     RepositoryCursor,
     RunStatus,
+    UnresolvedCollectionItem,
     utcnow,
 )
 
@@ -136,6 +137,231 @@ class Storage:
             RepositoryCursor, [row], ["repository_id", "stream"], ["last_updated_at", "updated_at"]
         )
 
+    def commit_collection_page(
+        self,
+        repository_id: int,
+        stream: str,
+        cursor_updated_at: datetime,
+        *,
+        issues: list[dict[str, Any]] | None = None,
+        pull_requests: list[dict[str, Any]] | None = None,
+        issue_comments: list[dict[str, Any]] | None = None,
+        pr_comments: list[dict[str, Any]] | None = None,
+        unresolved: list[dict[str, Any]] | None = None,
+    ) -> int:
+        """Atomically persist one API page and advance its durable cursor."""
+        issue_rows = [{**row, "repository_id": repository_id} for row in issues or []]
+        pr_rows = [{**row, "repository_id": repository_id} for row in pull_requests or []]
+        unresolved_rows = [
+            {
+                **row,
+                "repository_id": repository_id,
+                "attempt_count": 1,
+                "first_seen_at": row.get("first_seen_at", utcnow()),
+                "last_attempt_at": utcnow(),
+                "resolved_at": None,
+            }
+            for row in unresolved or []
+        ]
+        with self.sessions.begin() as session:
+            self._upsert_in_session(
+                session,
+                Issue,
+                issue_rows,
+                ["github_id"],
+                [
+                    "number",
+                    "title",
+                    "body",
+                    "state",
+                    "author_login",
+                    "author_github_id",
+                    "github_url",
+                    "created_at",
+                    "updated_at",
+                    "closed_at",
+                    "collected_at",
+                ],
+            )
+            self._upsert_in_session(
+                session,
+                PullRequest,
+                pr_rows,
+                ["repository_id", "number"],
+                [
+                    "number",
+                    "title",
+                    "body",
+                    "state",
+                    "author_login",
+                    "author_github_id",
+                    "github_url",
+                    "created_at",
+                    "updated_at",
+                    "closed_at",
+                    "merged_at",
+                    "collected_at",
+                ],
+            )
+            prepared_issue_comments = self._resolve_comment_parents_in_session(
+                session, repository_id, issue_comments or [], Issue, "issue_id"
+            )
+            prepared_pr_comments = self._resolve_comment_parents_in_session(
+                session, repository_id, pr_comments or [], PullRequest, "pull_request_id"
+            )
+            self._upsert_in_session(
+                session,
+                IssueComment,
+                prepared_issue_comments,
+                ["github_id"],
+                [
+                    "issue_id",
+                    "body",
+                    "author_login",
+                    "author_github_id",
+                    "github_url",
+                    "created_at",
+                    "updated_at",
+                    "collected_at",
+                ],
+            )
+            self._upsert_in_session(
+                session,
+                PullRequestComment,
+                prepared_pr_comments,
+                ["github_id", "comment_type"],
+                [
+                    "pull_request_id",
+                    "comment_type",
+                    "path",
+                    "in_reply_to_github_id",
+                    "body",
+                    "author_login",
+                    "author_github_id",
+                    "github_url",
+                    "created_at",
+                    "updated_at",
+                    "collected_at",
+                ],
+            )
+            self._upsert_in_session(
+                session,
+                UnresolvedCollectionItem,
+                unresolved_rows,
+                ["repository_id", "stream", "item_key"],
+                [
+                    "category",
+                    "github_id",
+                    "parent_number",
+                    "payload",
+                    "reason",
+                    "last_attempt_at",
+                    "resolved_at",
+                ],
+            )
+            self._upsert_in_session(
+                session,
+                RepositoryCursor,
+                [
+                    {
+                        "repository_id": repository_id,
+                        "stream": stream,
+                        "last_updated_at": cursor_updated_at,
+                        "updated_at": utcnow(),
+                    }
+                ],
+                ["repository_id", "stream"],
+                ["last_updated_at", "updated_at"],
+            )
+        return len(issue_rows) + len(pr_rows) + len(prepared_issue_comments) + len(
+            prepared_pr_comments
+        )
+
+    def save_unresolved_items(
+        self, repository_id: int, rows: list[dict[str, Any]]
+    ) -> None:
+        prepared = [
+            {
+                **row,
+                "repository_id": repository_id,
+                "attempt_count": 1,
+                "first_seen_at": row.get("first_seen_at", utcnow()),
+                "last_attempt_at": utcnow(),
+                "resolved_at": None,
+            }
+            for row in rows
+        ]
+        self._upsert(
+            UnresolvedCollectionItem,
+            prepared,
+            ["repository_id", "stream", "item_key"],
+            [
+                "category",
+                "github_id",
+                "parent_number",
+                "payload",
+                "reason",
+                "last_attempt_at",
+                "resolved_at",
+            ],
+        )
+
+    def pending_unresolved_items(
+        self,
+        repository_id: int,
+        stream: str,
+        *,
+        category: str = "missing_parent",
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        with self.sessions() as session:
+            rows = session.execute(
+                select(UnresolvedCollectionItem)
+                .where(
+                    UnresolvedCollectionItem.repository_id == repository_id,
+                    UnresolvedCollectionItem.stream == stream,
+                    UnresolvedCollectionItem.category == category,
+                    UnresolvedCollectionItem.resolved_at.is_(None),
+                )
+                .order_by(UnresolvedCollectionItem.id)
+                .limit(limit)
+            ).scalars()
+            return [
+                {
+                    "id": row.id,
+                    "github_id": row.github_id,
+                    "parent_number": row.parent_number,
+                    "payload": row.payload,
+                }
+                for row in rows
+            ]
+
+    def mark_unresolved_resolved(self, ids: Iterable[int]) -> None:
+        values = tuple(ids)
+        if not values:
+            return
+        with self.sessions.begin() as session:
+            session.execute(
+                update(UnresolvedCollectionItem)
+                .where(UnresolvedCollectionItem.id.in_(values))
+                .values(resolved_at=utcnow(), last_attempt_at=utcnow())
+            )
+
+    def mark_unresolved_attempt(self, ids: Iterable[int], reason: str) -> None:
+        values = tuple(ids)
+        if not values:
+            return
+        with self.sessions.begin() as session:
+            session.execute(
+                update(UnresolvedCollectionItem)
+                .where(UnresolvedCollectionItem.id.in_(values))
+                .values(
+                    attempt_count=UnresolvedCollectionItem.attempt_count + 1,
+                    reason=reason,
+                    last_attempt_at=utcnow(),
+                )
+            )
+
     def upsert_issues(self, repository_id: int, rows: list[dict[str, Any]]) -> int:
         prepared = [{**row, "repository_id": repository_id} for row in rows]
         self._upsert(
@@ -163,7 +389,7 @@ class Storage:
         self._upsert(
             PullRequest,
             prepared,
-            ["github_id"],
+            ["repository_id", "number"],
             [
                 "number",
                 "title",
@@ -256,13 +482,27 @@ class Storage:
     ) -> list[dict[str, Any]]:
         if not rows:
             return []
-        numbers = {int(row["parent_number"]) for row in rows}
         with self.sessions() as session:
-            parents = session.execute(
-                select(model.number, model.id).where(
-                    model.repository_id == repository_id, model.number.in_(numbers)
-                )
-            ).all()
+            return self._resolve_comment_parents_in_session(
+                session, repository_id, rows, model, target_key
+            )
+
+    @staticmethod
+    def _resolve_comment_parents_in_session(
+        session: Session,
+        repository_id: int,
+        rows: list[dict[str, Any]],
+        model: type[Issue] | type[PullRequest],
+        target_key: str,
+    ) -> list[dict[str, Any]]:
+        if not rows:
+            return []
+        numbers = {int(row["parent_number"]) for row in rows}
+        parents = session.execute(
+            select(model.number, model.id).where(
+                model.repository_id == repository_id, model.number.in_(numbers)
+            )
+        ).all()
         mapping = dict(parents)
         missing = numbers - mapping.keys()
         if missing:
@@ -285,22 +525,34 @@ class Storage:
     ) -> None:
         if not rows:
             return
-        table = model.__table__
         with self.sessions.begin() as session:
-            if self.engine.dialect.name == "mysql":
-                statement = mysql_insert(table).values(rows)
-                statement = statement.on_duplicate_key_update(
-                    **{column: statement.inserted[column] for column in update_columns}
-                )
-            elif self.engine.dialect.name == "sqlite":
-                statement = sqlite_insert(table).values(rows)
-                statement = statement.on_conflict_do_update(
-                    index_elements=conflict_columns,
-                    set_={column: statement.excluded[column] for column in update_columns},
-                )
-            else:
-                raise RuntimeError(f"暂不支持数据库方言: {self.engine.dialect.name}")
-            session.execute(statement)
+            self._upsert_in_session(session, model, rows, conflict_columns, update_columns)
+
+    def _upsert_in_session(
+        self,
+        session: Session,
+        model: type[Base],
+        rows: list[dict[str, Any]],
+        conflict_columns: list[str],
+        update_columns: list[str],
+    ) -> None:
+        if not rows:
+            return
+        table = model.__table__
+        if self.engine.dialect.name == "mysql":
+            statement = mysql_insert(table).values(rows)
+            statement = statement.on_duplicate_key_update(
+                **{column: statement.inserted[column] for column in update_columns}
+            )
+        elif self.engine.dialect.name == "sqlite":
+            statement = sqlite_insert(table).values(rows)
+            statement = statement.on_conflict_do_update(
+                index_elements=conflict_columns,
+                set_={column: statement.excluded[column] for column in update_columns},
+            )
+        else:
+            raise RuntimeError(f"暂不支持数据库方言: {self.engine.dialect.name}")
+        session.execute(statement)
 
     def iter_corpus_candidates(self, batch_size: int = 500) -> Iterator[list[dict[str, Any]]]:
         queries: list[tuple[str, Select[Any]]] = [

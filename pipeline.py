@@ -74,7 +74,11 @@ class Pipeline:
             client.close()
 
     def run_all(self, run_id: str, *, skip_label: bool = False) -> dict[str, Any]:
-        stats: dict[str, Any] = {"collection": self.collect(run_id)}
+        collection = self.collect(run_id)
+        stats: dict[str, Any] = {"collection": collection}
+        if collection["failed_streams"]:
+            logger.error("采集存在失败流，已跳过 corpus 构建和 LLM 标注")
+            return stats
         stats["corpus"] = self.build_corpus()
         if not skip_label:
             stats["llm_labeling"] = self.label()

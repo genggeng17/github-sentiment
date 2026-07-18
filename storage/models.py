@@ -124,6 +124,32 @@ class PullRequestComment(RawMixin, Base):
     in_reply_to_github_id: Mapped[int | None] = mapped_column(BigInteger)
 
 
+class UnresolvedCollectionItem(Base):
+    __tablename__ = "unresolved_collection_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "repository_id", "stream", "item_key", name="uq_unresolved_repo_stream_item"
+        ),
+        Index(
+            "ix_unresolved_pending", "repository_id", "stream", "category", "resolved_at"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id"), nullable=False)
+    stream: Mapped[str] = mapped_column(String(40), nullable=False)
+    item_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    category: Mapped[str] = mapped_column(String(30), nullable=False)
+    github_id: Mapped[int | None] = mapped_column(BigInteger)
+    parent_number: Mapped[int | None] = mapped_column(Integer)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    last_attempt_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
 class Corpus(Base):
     __tablename__ = "corpus"
     __table_args__ = (

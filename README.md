@@ -33,7 +33,7 @@ python pipeline.py run --skip-label
 ## 命令
 
 ```text
-python pipeline.py init-db        创建表
+python pipeline.py init-db        创建缺失的表（不会清空或重建已有表）
 python pipeline.py collect        只采集
 python pipeline.py build-corpus   只构建/更新语料
 python pipeline.py label          只标注未成功标注的语料
@@ -66,9 +66,17 @@ python pipeline.py repo enable rust-lang/rust
 
 - 每个仓库分别维护 Issue/PR、普通评论、Review comment 三条游标；
 - 请求 `since` 默认回退 5 分钟，同一对象依靠唯一键 upsert 去重；
-- 每页解析完成后立即用一个小事务写入 MySQL；
-- 只有一条数据流的全部 Link 分页成功后才推进该游标；
-- 中途失败时已提交页保留、游标不动，下次会重取并幂等覆盖；
+- 每页数据、隔离记录和 `repository_cursors` 游标在同一个 MySQL 事务中提交；
+- 每段最多读取 250 页，然后从当前游标重新发起 `since` 请求，避开仓库级
+  comments 接口第 301 页的分页限制；
+- 游标表示最近安全提交高水位；中途失败时下次从该游标向前重叠 5 分钟继续；
+- PR 正常采集直接使用仓库 Issue 列表中的 PR 表示，不再逐 PR 请求详情；
+- 评论缺少父记录时先按父编号补采；无法补采的原始响应进入
+  `unresolved_collection_items`，后续评论流启动时自动对账；
+- 单条解析或字段异常进入隔离表后继续当前页；HTTP 和数据库瞬时错误有限重试；
+  认证、权限和数据库 Schema 错误立即终止任务；
+- Issue/PR 父流失败时，该仓库两条评论流标记为 `skipped_dependency`；
+- `run` 发现任一采集流失败时停止在采集阶段，不构建 corpus，也不启动 LLM 标注；
 - MySQL named lock 阻止两个周任务并发执行；
 - `pipeline_runs` 和 `collection_stream_runs` 可查询整体及每仓库/流的页数、读取数、
   写入数、重试数和错误。

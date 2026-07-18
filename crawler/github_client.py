@@ -68,15 +68,21 @@ class GitHubClient:
     def __exit__(self, *_: object) -> None:
         self.close()
 
-    def paginate(self, path: str, params: dict[str, Any]) -> Iterator[GitHubPage]:
+    def paginate(
+        self, path: str, params: dict[str, Any], *, max_pages: int | None = None
+    ) -> Iterator[GitHubPage]:
         url: str | None = f"{self.base_url}{path}"
         request_params: dict[str, Any] | None = params
+        pages_read = 0
         while url:
             response, retries = self._request("GET", url, params=request_params)
             payload = response.json()
             if not isinstance(payload, list):
                 raise GitHubRequestError(f"GitHub 分页接口返回了非数组数据: {url}")
             yield GitHubPage(items=payload, retries=retries)
+            pages_read += 1
+            if max_pages is not None and pages_read >= max_pages:
+                return
             url = response.links.get("next", {}).get("url")
             request_params = None
 
