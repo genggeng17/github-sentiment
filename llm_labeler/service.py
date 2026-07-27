@@ -95,12 +95,17 @@ class DeepSeekLabeler:
         self.storage = storage
         self.batch_size = batch_size
 
-    def label_pending(self) -> dict[str, int]:
+    def label_pending(self, *, limit: int | None = None) -> dict[str, int]:
+        if limit is not None and limit <= 0:
+            raise ValueError("标注数量上限必须大于 0")
         stats = {"read": 0, "succeeded": 0, "failed": 0}
+        fetch_batch_size = min(self.batch_size, limit) if limit is not None else self.batch_size
         for batch in self.storage.iter_unannotated_corpus(
-            TAXONOMY_VERSION, PROMPT_VERSION, self.client.model, self.batch_size
+            TAXONOMY_VERSION, PROMPT_VERSION, self.client.model, fetch_batch_size
         ):
             for corpus in batch:
+                if limit is not None and stats["read"] >= limit:
+                    return stats
                 stats["read"] += 1
                 raw_response: str | None = None
                 try:

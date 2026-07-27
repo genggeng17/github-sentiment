@@ -17,6 +17,16 @@ from storage.models import RunStatus
 logger = logging.getLogger(__name__)
 
 
+def positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("必须是整数") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("必须大于 0")
+    return parsed
+
+
 class Pipeline:
     def __init__(self, settings: Settings, storage: Storage):
         self.settings = settings
@@ -57,7 +67,7 @@ class Pipeline:
     def build_corpus(self) -> dict[str, int]:
         return CorpusBuilder(self.storage).build()
 
-    def label(self) -> dict[str, int]:
+    def label(self, *, limit: int | None = None) -> dict[str, int]:
         self.settings.require_labeling()
         client = DeepSeekClient(
             self.settings.deepseek_api_key,
@@ -69,7 +79,7 @@ class Pipeline:
         try:
             return DeepSeekLabeler(
                 client, self.storage, batch_size=self.settings.label_batch_size
-            ).label_pending()
+            ).label_pending(limit=limit)
         finally:
             client.close()
 
@@ -118,7 +128,13 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("init-db", help="创建 MySQL 表")
     subparsers.add_parser("collect", help="执行历史回填或增量采集")
     subparsers.add_parser("build-corpus", help="清洗原始数据并更新统一语料")
-    subparsers.add_parser("label", help="标注尚未成功标注的语料")
+    label = subparsers.add_parser("label", help="标注尚未成功标注的语料")
+    label.add_argument(
+        "--limit",
+        type=positive_int,
+        default=None,
+        help="本次最多尝试标注的语料数（默认处理全部待标注语料）",
+    )
     run = subparsers.add_parser("run", help="执行采集、语料构建和 DeepSeek 标注")
     run.add_argument("--skip-label", action="store_true", help="跳过 DeepSeek 标注")
     status = subparsers.add_parser("status", help="查询最近运行记录")
@@ -172,7 +188,7 @@ def main(argv: list[str] | None = None) -> int:
     callbacks: dict[str, Callable[[str], dict[str, Any]]] = {
         "collect": pipeline.collect,
         "build-corpus": lambda _run_id: pipeline.build_corpus(),
-        "label": lambda _run_id: pipeline.label(),
+        "label": lambda _run_id: pipeline.label(limit=args.limit),
         "run": lambda run_id: pipeline.run_all(run_id, skip_label=args.skip_label),
     }
     run_id, status, stats = tracked_run(storage, args.command, callbacks[args.command])
