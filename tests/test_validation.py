@@ -6,19 +6,30 @@ from llm_labeler.validation import AnnotationValidationError, validate_annotatio
 
 
 def test_valid_annotation_is_normalized():
-    raw = json.dumps({"annotations": [{"aspect": "performance", "class": "positive"}]})
-    assert validate_annotation(raw) == {
-        "annotations": [{"aspect": "performance", "class": "positive"}]
-    }
+    annotations = [
+        {"aspect": "runtime_performance", "class": "positive"},
+        {"aspect": "compile_time", "class": "negative"},
+    ]
+    raw = json.dumps({"annotations": annotations})
+    assert validate_annotation(raw) == {"annotations": annotations}
+
+
+def test_empty_annotations_is_valid():
+    assert validate_annotation('{"annotations":[]}') == {"annotations": []}
 
 
 @pytest.mark.parametrize(
     "payload",
     [
         {"annotations": [{"aspect": "speed", "class": "positive"}]},
-        {"annotations": [{"aspect": "performance", "class": "mixed"}]},
-        {"annotations": [{"aspect": "performance", "class": "positive", "reason": "x"}]},
-        {"annotations": ["performance"]},
+        {"annotations": [{"aspect": "runtime_performance", "class": "mixed"}]},
+        {"annotations": [{"aspect": "safety", "class": "not_mentioned"}]},
+        {
+            "annotations": [
+                {"aspect": "runtime_performance", "class": "positive", "reason": "x"}
+            ]
+        },
+        {"annotations": ["runtime_performance"]},
         {"labels": []},
     ],
 )

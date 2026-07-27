@@ -8,22 +8,19 @@ ASPECTS = frozenset(
         "ownership",
         "type_system",
         "safety",
-        "performance",
+        "runtime_performance",
         "learning_curve",
         "compile_time",
-        "error_message",
-        "debugging",
-        "maintainability",
-        "readability",
-        "extensibility",
-        "api_design",
+        "diagnostics_debugging",
+        "tooling_documentation",
+        "readability_maintainability",
+        "api_extensibility",
         "package_manager",
-        "libraries",
-        "framework_support",
+        "libraries_frameworks",
         "community",
     }
 )
-CLASSES = frozenset({"positive", "neutral", "negative"})
+CLASSES = frozenset({"negative", "neutral", "positive"})
 
 
 class AnnotationValidationError(ValueError):

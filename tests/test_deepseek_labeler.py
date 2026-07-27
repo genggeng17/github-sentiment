@@ -26,7 +26,11 @@ def test_deepseek_client_requests_json_mode():
     finally:
         client.close()
     assert captured["response_format"] == {"type": "json_object"}
-    assert "CONTEXT only helps" in captured["messages"][0]["content"]
+    prompt = captured["messages"][0]["content"]
+    assert "CONTEXT 仅用于消歧" in prompt
+    assert "只输出 TARGET 明确提及的标签" in prompt
+    assert "未提及的标签不要输出" in prompt
+    assert "runtime_performance：程序运行速度" in prompt
 
 
 class FakeAnnotationStorage:

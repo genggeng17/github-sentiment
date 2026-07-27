@@ -88,8 +88,9 @@ python pipeline.py repo enable rust-lang/rust
 表达的情感。
 
 `llm_annotations` 同时保存原始响应、结构校验后的 JSON、错误、标签体系版本、Prompt
-版本与模型名。校验仅允许需求定义的 16 个 aspect 和 3 个 class；失败结果会记录但不会
-伪装成成功，下次运行会重试。
+版本与模型名。校验仅允许需求定义的 13 个 aspect 以及 `negative`、`neutral`、
+`positive` 三种 class；只输出文本明确提及的 aspect，未提及的 aspect 不写入
+`annotations`。失败结果会记录但不会伪装成成功，下次运行会重试。
 
 `corpus` 按来源和内容版本哈希保存不可变版本。GitHub 原文或父标题发生变化时会创建
 新版本并重新进入标注队列，旧标注仍指向当时的原始文本和模型输入。
