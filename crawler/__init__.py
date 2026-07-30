@@ -1,4 +1,4 @@
 from .github_client import GitHubClient
-from .service import GitHubCollector
+from .service import CollectionLimits, GitHubCollector
 
-__all__ = ["GitHubClient", "GitHubCollector"]
+__all__ = ["CollectionLimits", "GitHubClient", "GitHubCollector"]

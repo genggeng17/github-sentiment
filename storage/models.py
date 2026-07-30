@@ -179,6 +179,45 @@ class Corpus(Base):
     )
 
 
+class CorpusSampleSet(Base):
+    __tablename__ = "corpus_sample_sets"
+
+    id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    per_repository_limit: Mapped[int] = mapped_column(Integer, nullable=False)
+    seed: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="building")
+    stats: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+
+class CorpusSampleItem(Base):
+    __tablename__ = "corpus_sample_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "sample_set_id",
+            "repository_id",
+            "sample_rank",
+            name="uq_sample_repo_rank",
+        ),
+        Index("ix_sample_items_set_repo", "sample_set_id", "repository_id"),
+    )
+
+    sample_set_id: Mapped[int] = mapped_column(
+        ForeignKey("corpus_sample_sets.id"), primary_key=True
+    )
+    corpus_id: Mapped[int] = mapped_column(ForeignKey("corpus.id"), primary_key=True)
+    repository_id: Mapped[int] = mapped_column(
+        ForeignKey("repositories.id"), nullable=False
+    )
+    source_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    sample_rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    selected_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
 class LlmAnnotation(Base):
     __tablename__ = "llm_annotations"
     __table_args__ = (

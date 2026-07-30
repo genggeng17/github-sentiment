@@ -1,0 +1,111 @@
+from datetime import datetime
+
+import pytest
+from sqlalchemy import create_engine, func, select
+
+from corpus_builder import CorpusBuilder
+from sampler import CorpusSampler
+from storage import Storage
+from storage.models import CorpusSampleItem, CorpusSampleSet, Issue
+
+
+@pytest.fixture
+def storage():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    value = Storage("", engine=engine)
+    value.create_schema()
+    yield value
+    engine.dispose()
+
+
+def issue_row(github_id: int, number: int, body: str) -> dict:
+    return {
+        "github_id": github_id,
+        "number": number,
+        "title": f"Issue {number}",
+        "body": body,
+        "state": "open",
+        "author_login": "user",
+        "author_github_id": github_id,
+        "github_url": f"https://github.test/issues/{number}",
+        "created_at": datetime(2025, 1, 1),
+        "updated_at": datetime(2025, 1, 2),
+        "collected_at": datetime(2025, 1, 3),
+        "closed_at": None,
+    }
+
+
+def seed_repositories(storage: Storage) -> tuple[int, int]:
+    first = storage.ensure_repository("example/first")
+    second = storage.ensure_repository("example/second")
+    storage.upsert_issues(
+        first,
+        [issue_row(100 + number, number, f"First body {number}") for number in range(1, 6)],
+    )
+    storage.upsert_issues(
+        second,
+        [issue_row(200 + number, number, f"Second body {number}") for number in range(1, 4)],
+    )
+    CorpusBuilder(storage).build()
+    return first, second
+
+
+def test_sample_is_capped_per_repository_and_is_reusable(storage):
+    first, second = seed_repositories(storage)
+    sampler = CorpusSampler(storage)
+    stats = sampler.build("rust-v1", per_repository_limit=2, seed="fixed")
+    assert stats["selected"] == 4
+    assert stats["repositories"]["example/first"] == {"eligible": 5, "selected": 2}
+    assert stats["repositories"]["example/second"] == {"eligible": 3, "selected": 2}
+
+    with storage.sessions() as session:
+        counts = dict(
+            session.execute(
+                select(
+                    CorpusSampleItem.repository_id,
+                    func.count(CorpusSampleItem.corpus_id),
+                ).group_by(CorpusSampleItem.repository_id)
+            ).all()
+        )
+        selected_ids = set(session.scalars(select(CorpusSampleItem.corpus_id)))
+        sample_set = session.scalar(
+            select(CorpusSampleSet).where(CorpusSampleSet.name == "rust-v1")
+        )
+    assert counts == {first: 2, second: 2}
+    assert sample_set.status == "completed"
+
+    reused = sampler.build("rust-v1", per_repository_limit=2, seed="fixed")
+    assert reused["reused"] is True
+    with storage.sessions() as session:
+        assert set(session.scalars(select(CorpusSampleItem.corpus_id))) == selected_ids
+
+
+def test_sample_name_is_immutable(storage):
+    seed_repositories(storage)
+    sampler = CorpusSampler(storage)
+    sampler.build("rust-v1", per_repository_limit=2, seed="fixed")
+    with pytest.raises(ValueError, match="参数不同"):
+        sampler.build("rust-v1", per_repository_limit=3, seed="fixed")
+
+
+def test_annotation_iterator_only_returns_selected_corpus(storage):
+    seed_repositories(storage)
+    stats = CorpusSampler(storage).build(
+        "rust-v1",
+        per_repository_limit=1,
+        seed="fixed",
+    )
+    batches = list(
+        storage.iter_unannotated_corpus(
+            "taxonomy",
+            "prompt",
+            "model",
+            100,
+            sample_set_id=stats["sample_set_id"],
+        )
+    )
+    returned = {row["id"] for batch in batches for row in batch}
+    with storage.sessions() as session:
+        selected = set(session.scalars(select(CorpusSampleItem.corpus_id)))
+        assert session.scalar(select(func.count()).select_from(Issue)) == 8
+    assert returned == selected

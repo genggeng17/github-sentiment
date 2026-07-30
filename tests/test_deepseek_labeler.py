@@ -101,6 +101,44 @@ def test_label_command_accepts_positive_limit():
     assert args.limit == 30000
 
 
+def test_collection_command_accepts_per_type_limits():
+    args = build_parser().parse_args(
+        [
+            "collect",
+            "--max-issues",
+            "2000",
+            "--max-pull-requests",
+            "1000",
+            "--max-issue-comments",
+            "4000",
+            "--max-pr-comments",
+            "1500",
+            "--max-review-comments",
+            "1500",
+        ]
+    )
+    assert args.max_issues == 2000
+    assert args.max_pull_requests == 1000
+    assert args.max_issue_comments == 4000
+    assert args.max_pr_comments == 1500
+    assert args.max_review_comments == 1500
+
+
+def test_labeler_passes_sample_set_to_storage():
+    class SampleStorage(FakeAnnotationStorage):
+        def __init__(self):
+            super().__init__()
+            self.sample_set_id = None
+
+        def iter_unannotated_corpus(self, *args, sample_set_id=None):
+            self.sample_set_id = sample_set_id
+            yield [{"id": 7, "model_input": "target"}]
+
+    storage = SampleStorage()
+    DeepSeekLabeler(ValidClient(), storage).label_pending(sample_set_id=42)
+    assert storage.sample_set_id == 42
+
+
 @pytest.mark.parametrize("value", ["0", "-1", "not-a-number"])
 def test_label_command_rejects_invalid_limit(value):
     with pytest.raises(SystemExit):
