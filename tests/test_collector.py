@@ -5,7 +5,7 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.exc import OperationalError
 
 from crawler.github_client import GitHubPage, GitHubRequestError
-from crawler.service import GitHubCollector, StreamFailure
+from crawler.service import CollectionLimits, GitHubCollector, StreamFailure
 from storage import Storage
 from storage.models import (
     CollectionStreamRun,
@@ -102,6 +102,20 @@ def test_issue_stream_splits_prs_and_advances_cursor_after_success():
     assert storage.prs[0]["github_id"] == 999
     assert storage.advanced[0][2] == datetime(2025, 1, 4)
     assert client.params["since"] == "2025-01-02T00:05:00Z"
+
+
+def test_issue_stream_applies_independent_limits_and_reports_quota():
+    storage = FakeStorage()
+    collector = GitHubCollector(
+        SuccessfulClient(),
+        storage,
+        limits=CollectionLimits(issues=0, pull_requests=1),
+    )
+    stats = collector._collect_issues_and_prs(1, "rust-lang", "rust")
+    assert stats.status == "quota_reached"
+    assert storage.issues == []
+    assert len(storage.prs) == 1
+    assert storage.page_cursors[0][2] == datetime(2025, 1, 4)
 
 
 class InterruptedClient:

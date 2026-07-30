@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Engine, Select, create_engine, func, select, text, update
+from sqlalchemy import Engine, Select, create_engine, delete, func, select, text, update
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, sessionmaker
@@ -14,6 +14,8 @@ from .models import (
     Base,
     CollectionStreamRun,
     Corpus,
+    CorpusSampleItem,
+    CorpusSampleSet,
     Issue,
     IssueComment,
     LlmAnnotation,
@@ -632,6 +634,142 @@ class Storage:
                     yield batch
                     last_id = batch[-1]["source_id"]
 
+    def iter_sample_candidates(
+        self,
+        repository_id: int,
+        *,
+        batch_size: int = 1000,
+    ) -> Iterator[list[dict[str, Any]]]:
+        queries: list[Select[Any]] = [
+            select(Corpus.id, Corpus.source_type, Corpus.content_hash)
+            .join(Issue, Issue.id == Corpus.source_id)
+            .where(
+                Corpus.source_type == "issue",
+                Issue.repository_id == repository_id,
+            ),
+            select(Corpus.id, Corpus.source_type, Corpus.content_hash)
+            .join(PullRequest, PullRequest.id == Corpus.source_id)
+            .where(
+                Corpus.source_type == "pull_request",
+                PullRequest.repository_id == repository_id,
+            ),
+            select(Corpus.id, Corpus.source_type, Corpus.content_hash)
+            .join(IssueComment, IssueComment.id == Corpus.source_id)
+            .where(
+                Corpus.source_type == "issue_comment",
+                IssueComment.repository_id == repository_id,
+            ),
+            select(Corpus.id, Corpus.source_type, Corpus.content_hash)
+            .join(PullRequestComment, PullRequestComment.id == Corpus.source_id)
+            .where(
+                Corpus.source_type == "pr_issue_comment",
+                PullRequestComment.repository_id == repository_id,
+                PullRequestComment.comment_type == "issue_comment",
+            ),
+            select(Corpus.id, Corpus.source_type, Corpus.content_hash)
+            .join(PullRequestComment, PullRequestComment.id == Corpus.source_id)
+            .where(
+                Corpus.source_type == "pr_review_comment",
+                PullRequestComment.repository_id == repository_id,
+                PullRequestComment.comment_type == "review_comment",
+            ),
+        ]
+        with self.sessions() as session:
+            for query in queries:
+                last_id = 0
+                while True:
+                    rows = (
+                        session.execute(
+                            query.where(
+                                Corpus.id > last_id,
+                                Corpus.duplicate_of_id.is_(None),
+                            )
+                            .order_by(Corpus.id)
+                            .limit(batch_size)
+                        )
+                        .mappings()
+                        .all()
+                    )
+                    if not rows:
+                        break
+                    batch = [dict(row) for row in rows]
+                    yield batch
+                    last_id = batch[-1]["id"]
+
+    def prepare_sample_set(
+        self,
+        name: str,
+        per_repository_limit: int,
+        seed: str,
+    ) -> tuple[int, dict[str, Any] | None]:
+        with self.sessions.begin() as session:
+            existing = session.scalar(
+                select(CorpusSampleSet).where(CorpusSampleSet.name == name)
+            )
+            if existing is not None:
+                if (
+                    existing.per_repository_limit != per_repository_limit
+                    or existing.seed != seed
+                ):
+                    raise ValueError(
+                        f"采样集 {name!r} 已存在但参数不同；请使用新的采样集名称"
+                    )
+                if existing.status == "completed":
+                    return existing.id, dict(existing.stats)
+                session.execute(
+                    delete(CorpusSampleItem).where(
+                        CorpusSampleItem.sample_set_id == existing.id
+                    )
+                )
+                existing.status = "building"
+                existing.stats = {}
+                existing.updated_at = utcnow()
+                return existing.id, None
+            sample_set = CorpusSampleSet(
+                name=name,
+                per_repository_limit=per_repository_limit,
+                seed=seed,
+                status="building",
+                stats={},
+            )
+            session.add(sample_set)
+            session.flush()
+            return sample_set.id, None
+
+    def insert_sample_items(self, rows: list[dict[str, Any]], batch_size: int = 500) -> int:
+        written = 0
+        for offset in range(0, len(rows), batch_size):
+            batch = rows[offset : offset + batch_size]
+            with self.sessions.begin() as session:
+                session.add_all(CorpusSampleItem(**row) for row in batch)
+            written += len(batch)
+        return written
+
+    def finish_sample_set(
+        self,
+        sample_set_id: int,
+        status: str,
+        stats: dict[str, Any],
+    ) -> None:
+        with self.sessions.begin() as session:
+            sample_set = session.get(CorpusSampleSet, sample_set_id)
+            if sample_set is None:
+                raise ValueError(f"采样集不存在: id={sample_set_id}")
+            sample_set.status = status
+            sample_set.stats = stats
+            sample_set.updated_at = utcnow()
+
+    def completed_sample_set_id(self, name: str) -> int:
+        with self.sessions() as session:
+            sample_set = session.scalar(
+                select(CorpusSampleSet).where(CorpusSampleSet.name == name)
+            )
+            if sample_set is None:
+                raise ValueError(f"采样集不存在: {name}")
+            if sample_set.status != "completed":
+                raise ValueError(f"采样集尚未构建完成: {name} ({sample_set.status})")
+            return sample_set.id
+
     def find_corpus_by_hash(
         self, content_hash: str, *, exclude_id: int | None = None
     ) -> int | None:
@@ -671,6 +809,8 @@ class Storage:
         prompt_version: str,
         model_name: str,
         batch_size: int,
+        *,
+        sample_set_id: int | None = None,
     ) -> Iterator[list[dict[str, Any]]]:
         last_id = 0
         with self.sessions() as session:
@@ -681,10 +821,15 @@ class Storage:
                     LlmAnnotation.model_name == model_name,
                     LlmAnnotation.status == "succeeded",
                 )
+                query = select(Corpus.id, Corpus.model_input)
+                if sample_set_id is not None:
+                    query = query.join(
+                        CorpusSampleItem,
+                        CorpusSampleItem.corpus_id == Corpus.id,
+                    ).where(CorpusSampleItem.sample_set_id == sample_set_id)
                 rows = (
                     session.execute(
-                        select(Corpus.id, Corpus.model_input)
-                        .where(
+                        query.where(
                             Corpus.id > last_id,
                             Corpus.duplicate_of_id.is_(None),
                             ~Corpus.id.in_(already),

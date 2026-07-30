@@ -55,6 +55,20 @@ class StreamStats:
     error_message: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class CollectionLimits:
+    issues: int | None = None
+    pull_requests: int | None = None
+    issue_comments: int | None = None
+    pr_issue_comments: int | None = None
+    pr_review_comments: int | None = None
+
+    def __post_init__(self) -> None:
+        for name, value in asdict(self).items():
+            if value is not None and value < 0:
+                raise ValueError(f"{name} 采集上限不能小于 0")
+
+
 class GitHubCollector:
     def __init__(
         self,
@@ -64,6 +78,7 @@ class GitHubCollector:
         cursor_overlap_seconds: int = 300,
         segment_page_limit: int = 250,
         page_write_max_retries: int = 3,
+        limits: CollectionLimits | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ):
         self.client = client
@@ -71,6 +86,7 @@ class GitHubCollector:
         self.cursor_overlap = timedelta(seconds=cursor_overlap_seconds)
         self.segment_page_limit = segment_page_limit
         self.page_write_max_retries = page_write_max_retries
+        self.limits = limits or CollectionLimits()
         self._sleep = sleep
 
     def collect_repository(
@@ -99,7 +115,8 @@ class GitHubCollector:
             else:
                 try:
                     stats = handler(repository_id, owner, repo)
-                    stats.status = "succeeded"
+                    if stats.status == "running":
+                        stats.status = "succeeded"
                 except Exception as exc:  # failure is recorded before propagation/continuation
                     logger.exception("采集 %s/%s 失败", full_name, stream)
                     stats = getattr(exc, "stream_stats", StreamStats())
@@ -133,6 +150,23 @@ class GitHubCollector:
         return (
             isinstance(cause, GitHubRequestError) and cause.status_code in {401, 403}
         ) or isinstance(cause, ProgrammingError)
+
+    @staticmethod
+    def _take_rows(
+        rows: list[dict[str, Any]],
+        limit: int | None,
+        selected: int,
+    ) -> list[dict[str, Any]]:
+        if limit is None:
+            return rows
+        remaining = max(0, limit - selected)
+        return rows[:remaining]
+
+    @staticmethod
+    def _all_quotas_reached(*values: tuple[int | None, int]) -> bool:
+        return bool(values) and all(
+            limit is not None and selected >= limit for limit, selected in values
+        )
 
     def _since_params(self, repository_id: int, stream: str) -> dict[str, Any]:
         params: dict[str, Any] = {"per_page": 100, "sort": "updated", "direction": "asc"}
@@ -282,6 +316,15 @@ class GitHubCollector:
 
     def _collect_issues_and_prs(self, repository_id: int, owner: str, repo: str) -> StreamStats:
         stats = StreamStats()
+        selected_issues = 0
+        selected_prs = 0
+        quotas = (
+            (self.limits.issues, selected_issues),
+            (self.limits.pull_requests, selected_prs),
+        )
+        if self._all_quotas_reached(*quotas):
+            stats.status = "quota_reached"
+            return stats
         scan_started_at = utcnow()
         latest = self.storage.get_cursor(repository_id, STREAM_ISSUES)
         try:
@@ -316,6 +359,18 @@ class GitHubCollector:
                     for row in parsed_rows
                     if row["_collection_kind"] == "pr"
                 ]
+                issue_rows = self._take_rows(
+                    issue_rows,
+                    self.limits.issues,
+                    selected_issues,
+                )
+                pr_rows = self._take_rows(
+                    pr_rows,
+                    self.limits.pull_requests,
+                    selected_prs,
+                )
+                selected_issues += len(issue_rows)
+                selected_prs += len(pr_rows)
                 latest = self._advance_raw_position(latest, page.items)
                 if latest is not None:
                     stats.items_written += self._commit_page(
@@ -329,6 +384,12 @@ class GitHubCollector:
                 elif unresolved:
                     self.storage.save_unresolved_items(repository_id, unresolved)
                     raise RuntimeError("当前页没有可用 updated_at，无法安全推进游标")
+                if self._all_quotas_reached(
+                    (self.limits.issues, selected_issues),
+                    (self.limits.pull_requests, selected_prs),
+                ):
+                    stats.status = "quota_reached"
+                    return stats
             self.storage.advance_cursor(
                 repository_id, STREAM_ISSUES, latest or scan_started_at
             )
@@ -338,6 +399,14 @@ class GitHubCollector:
 
     def _collect_issue_comments(self, repository_id: int, owner: str, repo: str) -> StreamStats:
         stats = StreamStats()
+        selected_issue_comments = 0
+        selected_pr_comments = 0
+        if self._all_quotas_reached(
+            (self.limits.issue_comments, selected_issue_comments),
+            (self.limits.pr_issue_comments, selected_pr_comments),
+        ):
+            stats.status = "quota_reached"
+            return stats
         scan_started_at = utcnow()
         latest = self.storage.get_cursor(repository_id, STREAM_ISSUE_COMMENTS)
         try:
@@ -382,6 +451,18 @@ class GitHubCollector:
                     for row in rows
                     if row["parent_number"] in pr_numbers
                 ]
+                issue_rows = self._take_rows(
+                    issue_rows,
+                    self.limits.issue_comments,
+                    selected_issue_comments,
+                )
+                pr_rows = self._take_rows(
+                    pr_rows,
+                    self.limits.pr_issue_comments,
+                    selected_pr_comments,
+                )
+                selected_issue_comments += len(issue_rows)
+                selected_pr_comments += len(pr_rows)
                 unresolved.extend(
                     self._unresolved_row(
                         STREAM_ISSUE_COMMENTS,
@@ -405,6 +486,12 @@ class GitHubCollector:
                 elif unresolved:
                     self.storage.save_unresolved_items(repository_id, unresolved)
                     raise RuntimeError("当前页没有可用 updated_at，无法安全推进游标")
+                if self._all_quotas_reached(
+                    (self.limits.issue_comments, selected_issue_comments),
+                    (self.limits.pr_issue_comments, selected_pr_comments),
+                ):
+                    stats.status = "quota_reached"
+                    return stats
             self.storage.advance_cursor(
                 repository_id,
                 STREAM_ISSUE_COMMENTS,
@@ -416,6 +503,12 @@ class GitHubCollector:
 
     def _collect_review_comments(self, repository_id: int, owner: str, repo: str) -> StreamStats:
         stats = StreamStats()
+        selected_review_comments = 0
+        if self._all_quotas_reached(
+            (self.limits.pr_review_comments, selected_review_comments)
+        ):
+            stats.status = "quota_reached"
+            return stats
         scan_started_at = utcnow()
         latest = self.storage.get_cursor(repository_id, STREAM_REVIEW_COMMENTS)
         try:
@@ -444,6 +537,12 @@ class GitHubCollector:
                     failures = {}
                 unknown = numbers - pr_numbers
                 valid_rows = [row for row in rows if row["parent_number"] in pr_numbers]
+                valid_rows = self._take_rows(
+                    valid_rows,
+                    self.limits.pr_review_comments,
+                    selected_review_comments,
+                )
+                selected_review_comments += len(valid_rows)
                 unresolved.extend(
                     self._unresolved_row(
                         STREAM_REVIEW_COMMENTS,
@@ -466,6 +565,11 @@ class GitHubCollector:
                 elif unresolved:
                     self.storage.save_unresolved_items(repository_id, unresolved)
                     raise RuntimeError("当前页没有可用 updated_at，无法安全推进游标")
+                if self._all_quotas_reached(
+                    (self.limits.pr_review_comments, selected_review_comments)
+                ):
+                    stats.status = "quota_reached"
+                    return stats
             self.storage.advance_cursor(
                 repository_id,
                 STREAM_REVIEW_COMMENTS,

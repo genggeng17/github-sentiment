@@ -23,7 +23,7 @@ dev = [
 ]
 
 [tool.setuptools]
-py-modules = ["config", "corpus_builder", "pipeline"]
+py-modules = ["config", "corpus_builder", "pipeline", "sampler"]
 packages = ["crawler", "llm_labeler", "bert_labeler", "storage"]
 
 [tool.pytest.ini_options]
