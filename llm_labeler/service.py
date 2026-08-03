@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import json
 import logging
 import random
 import time
 from collections.abc import Callable
+from typing import Any
 
 import httpx
 
 from storage import Storage
 
 from .prompts import PROMPT_VERSION, SYSTEM_PROMPT, TAXONOMY_VERSION
-from .validation import AnnotationValidationError, validate_annotation
+from .validation import AnnotationValidationError, validate_batch_annotations
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +42,22 @@ class DeepSeekClient:
     def close(self) -> None:
         self._client.close()
 
-    def complete(self, model_input: str) -> str:
+    def complete_batch(self, corpus: list[dict[str, Any]]) -> str:
+        if not corpus:
+            raise ValueError("批量标注至少需要一条语料")
+        model_input = json.dumps(
+            {
+                "items": [
+                    {
+                        "corpus_id": item["id"],
+                        "model_input": item["model_input"],
+                    }
+                    for item in corpus
+                ]
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
         payload = {
             "model": self.model,
             "messages": [
@@ -49,7 +66,7 @@ class DeepSeekClient:
             ],
             "response_format": {"type": "json_object"},
             "temperature": 0,
-            "max_tokens": 800,
+            "max_tokens": min(8192, max(800, 400 * len(corpus))),
             "stream": False,
         }
         last_error: Exception | None = None
@@ -61,7 +78,10 @@ class DeepSeekClient:
                         "DeepSeek 暂时不可用", request=response.request, response=response
                     )
                 response.raise_for_status()
-                content = response.json()["choices"][0]["message"]["content"]
+                choice = response.json()["choices"][0]
+                if choice.get("finish_reason") == "length":
+                    raise ValueError("DeepSeek 批量响应因达到长度上限而被截断")
+                content = choice["message"]["content"]
                 if not isinstance(content, str) or not content.strip():
                     raise ValueError("DeepSeek 返回空内容")
                 return content.strip()
@@ -119,33 +139,59 @@ class DeepSeekLabeler:
                 sample_set_id=sample_set_id,
             )
         for batch in batches:
-            for corpus in batch:
-                if limit is not None and stats["read"] >= limit:
-                    return stats
-                stats["read"] += 1
-                raw_response: str | None = None
-                try:
-                    raw_response = self.client.complete(corpus["model_input"])
-                    parsed = validate_annotation(raw_response)
-                    status = "succeeded"
-                    error = None
-                    stats["succeeded"] += 1
-                except (AnnotationValidationError, RuntimeError, ValueError, KeyError) as exc:
+            remaining = limit - stats["read"] if limit is not None else len(batch)
+            current_batch = batch[:remaining]
+            if not current_batch:
+                return stats
+            stats["read"] += len(current_batch)
+            raw_response: str | None = None
+            batch_error: str | None = None
+            try:
+                raw_response = self.client.complete_batch(current_batch)
+                batch_results = validate_batch_annotations(
+                    raw_response,
+                    [corpus["id"] for corpus in current_batch],
+                )
+            except (AnnotationValidationError, RuntimeError, ValueError, KeyError) as exc:
+                logger.error(
+                    "批量语料 %s 标注失败: %s",
+                    [corpus["id"] for corpus in current_batch],
+                    exc,
+                )
+                batch_error = str(exc)
+                batch_results = None
+
+            for corpus in current_batch:
+                if batch_results is None:
                     parsed = None
                     status = "failed"
-                    error = str(exc)
+                    error = batch_error
+                    item_raw_response = raw_response
                     stats["failed"] += 1
-                    logger.error("语料 %s 标注失败: %s", corpus["id"], exc)
+                else:
+                    result = batch_results[corpus["id"]]
+                    parsed = result.parsed_result
+                    item_raw_response = result.raw_response
+                    error = result.error_message
+                    if error is None:
+                        status = "succeeded"
+                        stats["succeeded"] += 1
+                    else:
+                        status = "failed"
+                        stats["failed"] += 1
+                        logger.error("语料 %s 标注失败: %s", corpus["id"], error)
                 self.storage.save_annotation(
                     {
                         "corpus_id": corpus["id"],
                         "taxonomy_version": TAXONOMY_VERSION,
                         "prompt_version": PROMPT_VERSION,
                         "model_name": self.client.model,
-                        "raw_response": raw_response,
+                        "raw_response": item_raw_response,
                         "parsed_result": parsed,
                         "status": status,
                         "error_message": error,
                     }
                 )
+            if limit is not None and stats["read"] >= limit:
+                return stats
         return stats

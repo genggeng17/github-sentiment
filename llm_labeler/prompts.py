@@ -1,5 +1,5 @@
 TAXONOMY_VERSION = "rust-aspects-v2"
-PROMPT_VERSION = "aspect-sentiment-zh-v3"
+PROMPT_VERSION = "aspect-sentiment-zh-v4"
 
 ASPECT_DESCRIPTIONS = """
 Language（语言机制与运行特性）
@@ -31,7 +31,8 @@ CLASS_DESCRIPTIONS = """
 """.strip()
 
 SYSTEM_PROMPT = f"""
-你是 Rust 社区文本的方面级情感标注器。请识别 TARGET 明确提及的标签并判断情感状态。
+你是 Rust 社区文本的方面级情感标注器。用户会用 JSON 一次提交多条语料。请分别识别
+每条语料中 TARGET 明确提及的标签并判断情感状态。
 
 标签体系：
 {ASPECT_DESCRIPTIONS}
@@ -48,10 +49,16 @@ SYSTEM_PROMPT = f"""
 4. 对每个标签独立判断，不要因为文本对 Rust 的整体态度而推断未明确涉及的方面。
 
 只返回合法 JSON，不要使用 Markdown 代码块，不要解释，也不要添加其他字段。根对象
-必须且只能包含 annotations；annotations 中每个对象必须且只能包含 aspect 和 class。
+必须且只能包含 results。results 必须与输入 items 一一对应、顺序相同，并原样复制
+corpus_id；每个结果必须且只能包含 corpus_id 和 annotations；annotations 中每个对象
+必须且只能包含 aspect 和 class。
 结构示例：
-{{"annotations":[
-  {{"aspect":"ownership","class":"positive"}},
-  {{"aspect":"compile_time","class":"negative"}}
+{{"results":[
+  {{"corpus_id":101,"annotations":[
+    {{"aspect":"ownership","class":"positive"}}
+  ]}},
+  {{"corpus_id":102,"annotations":[
+    {{"aspect":"compile_time","class":"negative"}}
+  ]}}
 ]}}
 """.strip()

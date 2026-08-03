@@ -37,7 +37,7 @@ class Settings:
     http_max_retries: int = 5
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-chat"
+    deepseek_model: str = "deepseek-v4-flash"
     label_batch_size: int = 20
     log_level: str = "INFO"
 
@@ -68,7 +68,7 @@ class Settings:
             deepseek_base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip(
                 "/"
             ),
-            deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+            deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
             label_batch_size=_positive_int("LABEL_BATCH_SIZE", 20),
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         )

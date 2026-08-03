@@ -14,7 +14,18 @@ def test_deepseek_client_requests_json_mode():
         captured.update(json.loads(request.content))
         return httpx.Response(
             200,
-            json={"choices": [{"message": {"content": '{"annotations":[]}'}}]},
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": (
+                                '{"results":[{"corpus_id":7,"annotations":[]}]}'
+                            )
+                        },
+                    }
+                ]
+            },
         )
 
     client = DeepSeekClient(
@@ -24,7 +35,10 @@ def test_deepseek_client_requests_json_mode():
         transport=httpx.MockTransport(handler),
     )
     try:
-        assert client.complete("[TARGET]\nhello") == '{"annotations":[]}'
+        assert (
+            client.complete_batch([{"id": 7, "model_input": "[TARGET]\nhello"}])
+            == '{"results":[{"corpus_id":7,"annotations":[]}]}'
+        )
     finally:
         client.close()
     assert captured["response_format"] == {"type": "json_object"}
@@ -33,6 +47,11 @@ def test_deepseek_client_requests_json_mode():
     assert "只输出 TARGET 明确提及的标签" in prompt
     assert "未提及的标签不要输出" in prompt
     assert "runtime_performance：程序运行速度" in prompt
+    assert "results 必须与输入 items 一一对应" in prompt
+    user_payload = json.loads(captured["messages"][1]["content"])
+    assert user_payload == {
+        "items": [{"corpus_id": 7, "model_input": "[TARGET]\nhello"}]
+    }
 
 
 class FakeAnnotationStorage:
@@ -49,8 +68,11 @@ class FakeAnnotationStorage:
 class InvalidClient:
     model = "deepseek-chat"
 
-    def complete(self, model_input):
-        return '{"annotations":[{"aspect":"not_allowed","class":"positive"}]}'
+    def complete_batch(self, corpus):
+        return (
+            '{"results":[{"corpus_id":7,"annotations":'
+            '[{"aspect":"not_allowed","class":"positive"}]}]}'
+        )
 
 
 def test_invalid_model_output_is_recorded_as_failed():
@@ -65,8 +87,19 @@ def test_invalid_model_output_is_recorded_as_failed():
 class ValidClient:
     model = "deepseek-chat"
 
-    def complete(self, model_input):
-        return '{"annotations":[]}'
+    def __init__(self):
+        self.calls = []
+
+    def complete_batch(self, corpus):
+        self.calls.append(corpus)
+        return json.dumps(
+            {
+                "results": [
+                    {"corpus_id": item["id"], "annotations": []}
+                    for item in corpus
+                ]
+            }
+        )
 
 
 class MultipleCorpusStorage(FakeAnnotationStorage):
@@ -84,10 +117,75 @@ class MultipleCorpusStorage(FakeAnnotationStorage):
 
 def test_label_pending_stops_at_limit():
     storage = MultipleCorpusStorage(5)
-    stats = DeepSeekLabeler(ValidClient(), storage, batch_size=20).label_pending(limit=2)
+    client = ValidClient()
+    stats = DeepSeekLabeler(client, storage, batch_size=20).label_pending(limit=2)
     assert stats == {"read": 2, "succeeded": 2, "failed": 0}
     assert storage.requested_batch_size == 2
     assert [row["corpus_id"] for row in storage.saved] == [0, 1]
+    assert [[item["id"] for item in call] for call in client.calls] == [[0, 1]]
+
+
+def test_label_pending_batches_multiple_corpus_into_one_request():
+    storage = MultipleCorpusStorage(3)
+    client = ValidClient()
+    stats = DeepSeekLabeler(client, storage, batch_size=20).label_pending()
+    assert stats == {"read": 3, "succeeded": 3, "failed": 0}
+    assert len(client.calls) == 1
+    assert [item["id"] for item in client.calls[0]] == [0, 1, 2]
+
+
+def test_invalid_item_does_not_fail_other_items_in_batch():
+    class PartlyInvalidClient:
+        model = "deepseek-chat"
+
+        def complete_batch(self, corpus):
+            return json.dumps(
+                {
+                    "results": [
+                        {"corpus_id": 0, "annotations": []},
+                        {
+                            "corpus_id": 1,
+                            "annotations": [
+                                {"aspect": "not_allowed", "class": "positive"}
+                            ],
+                        },
+                    ]
+                }
+            )
+
+    storage = MultipleCorpusStorage(2)
+    stats = DeepSeekLabeler(PartlyInvalidClient(), storage).label_pending()
+    assert stats == {"read": 2, "succeeded": 1, "failed": 1}
+    assert [row["status"] for row in storage.saved] == ["succeeded", "failed"]
+    assert "未知 aspect" in storage.saved[1]["error_message"]
+
+
+def test_missing_item_is_recorded_as_failed_without_failing_present_item():
+    class MissingItemClient:
+        model = "deepseek-chat"
+
+        def complete_batch(self, corpus):
+            return '{"results":[{"corpus_id":0,"annotations":[]}]}'
+
+    storage = MultipleCorpusStorage(2)
+    stats = DeepSeekLabeler(MissingItemClient(), storage).label_pending()
+    assert stats == {"read": 2, "succeeded": 1, "failed": 1}
+    assert storage.saved[1]["error_message"] == "批量响应缺少 corpus_id=1"
+    assert storage.saved[1]["raw_response"].startswith('{"results"')
+
+
+def test_invalid_batch_envelope_fails_every_item_with_raw_response():
+    class InvalidEnvelopeClient:
+        model = "deepseek-chat"
+
+        def complete_batch(self, corpus):
+            return '{"annotations":[]}'
+
+    storage = MultipleCorpusStorage(2)
+    stats = DeepSeekLabeler(InvalidEnvelopeClient(), storage).label_pending()
+    assert stats == {"read": 2, "succeeded": 0, "failed": 2}
+    assert all(row["raw_response"] == '{"annotations":[]}' for row in storage.saved)
+    assert all("批量响应根对象" in row["error_message"] for row in storage.saved)
 
 
 def test_label_pending_rejects_non_positive_limit():
