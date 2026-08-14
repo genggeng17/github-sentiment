@@ -58,7 +58,7 @@ class FakeAnnotationStorage:
     def __init__(self):
         self.saved = []
 
-    def iter_unannotated_corpus(self, *args):
+    def iter_unannotated_corpus(self, *args, **kwargs):
         yield [{"id": 7, "model_input": "target"}]
 
     def save_annotation(self, row):
@@ -109,7 +109,7 @@ class MultipleCorpusStorage(FakeAnnotationStorage):
         self.requested_batch_size = None
 
     def iter_unannotated_corpus(
-        self, taxonomy_version, prompt_version, model_name, batch_size
+        self, taxonomy_version, prompt_version, model_name, batch_size, **kwargs
     ):
         self.requested_batch_size = batch_size
         yield [{"id": index, "model_input": f"target-{index}"} for index in range(self.count)]

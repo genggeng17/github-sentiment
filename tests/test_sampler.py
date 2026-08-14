@@ -1,12 +1,12 @@
 from datetime import datetime
 
 import pytest
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, select, update
 
-from corpus_builder import CorpusBuilder
+from corpus_builder import CLEANING_VERSION, CorpusBuilder
 from sampler import CorpusSampler
 from storage import Storage
-from storage.models import CorpusSampleItem, CorpusSampleSet, Issue
+from storage.models import Corpus, CorpusSampleItem, CorpusSampleSet, Issue
 
 
 @pytest.fixture
@@ -55,6 +55,7 @@ def test_sample_is_capped_per_repository_and_is_reusable(storage):
     sampler = CorpusSampler(storage)
     stats = sampler.build("rust-v1", per_repository_limit=2, seed="fixed")
     assert stats["selected"] == 4
+    assert stats["cleaning_version"] == CLEANING_VERSION
     assert stats["repositories"]["example/first"] == {"eligible": 5, "selected": 2}
     assert stats["repositories"]["example/second"] == {"eligible": 3, "selected": 2}
 
@@ -109,3 +110,22 @@ def test_annotation_iterator_only_returns_selected_corpus(storage):
         selected = set(session.scalars(select(CorpusSampleItem.corpus_id)))
         assert session.scalar(select(func.count()).select_from(Issue)) == 8
     assert returned == selected
+
+
+def test_new_sample_only_uses_current_cleaning_version(storage):
+    seed_repositories(storage)
+    with storage.sessions.begin() as session:
+        oldest_id = session.scalar(select(func.min(Corpus.id)))
+        session.execute(
+            update(Corpus)
+            .where(Corpus.id == oldest_id)
+            .values(cleaning_version="clean-v1")
+        )
+
+    stats = CorpusSampler(storage).build(
+        "rust-clean-v2",
+        per_repository_limit=100,
+        seed="fixed",
+    )
+    assert stats["eligible"] == 7
+    assert stats["selected"] == 7

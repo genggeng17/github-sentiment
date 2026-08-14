@@ -638,6 +638,7 @@ class Storage:
         self,
         repository_id: int,
         *,
+        cleaning_version: str | None = None,
         batch_size: int = 1000,
     ) -> Iterator[list[dict[str, Any]]]:
         queries: list[Select[Any]] = [
@@ -676,6 +677,8 @@ class Storage:
         ]
         with self.sessions() as session:
             for query in queries:
+                if cleaning_version is not None:
+                    query = query.where(Corpus.cleaning_version == cleaning_version)
                 last_id = 0
                 while True:
                     rows = (
@@ -811,6 +814,7 @@ class Storage:
         batch_size: int,
         *,
         sample_set_id: int | None = None,
+        cleaning_version: str | None = None,
     ) -> Iterator[list[dict[str, Any]]]:
         last_id = 0
         with self.sessions() as session:
@@ -827,6 +831,8 @@ class Storage:
                         CorpusSampleItem,
                         CorpusSampleItem.corpus_id == Corpus.id,
                     ).where(CorpusSampleItem.sample_set_id == sample_set_id)
+                elif cleaning_version is not None:
+                    query = query.where(Corpus.cleaning_version == cleaning_version)
                 rows = (
                     session.execute(
                         query.where(

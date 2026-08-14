@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from corpus_builder import clean_text, make_corpus_row
+from corpus_builder import CLEANING_VERSION, clean_text, make_corpus_row, normalize_text
 
 
 def source(source_type, **overrides):
@@ -45,10 +45,84 @@ def test_review_file_path_does_not_affect_corpus_version():
     assert first["model_input"] == second["model_input"]
 
 
-def test_cleaning_preserves_code_but_removes_hidden_markup():
+def test_normalization_preserves_code_but_removes_hidden_markup():
     value = "hello\u200b  \r\n<!-- bot -->\r\n\r\n\r\n```rust\nfn main() {}\n```"
-    cleaned = clean_text(value)
+    cleaned = normalize_text(value)
     assert "bot" not in cleaned
     assert "\u200b" not in cleaned
     assert "```rust" in cleaned
     assert "\n\n\n" not in cleaned
+
+
+def test_cleaning_collapses_fenced_code_but_preserves_surrounding_sentiment():
+    value = (
+        "This API is extremely confusing.\n\n"
+        "```rust\nfn main() {\n    panic!(\"boom\");\n}\n```\n\n"
+        "The compiler message gives no useful hint."
+    )
+    cleaned = clean_text(value)
+    assert "This API is extremely confusing." in cleaned
+    assert "The compiler message gives no useful hint." in cleaned
+    assert "[CODE_BLOCK_REMOVED: 3 lines]" in cleaned
+    assert "panic!" not in cleaned
+
+
+def test_cleaning_preserves_inline_code_and_short_diagnostic():
+    value = "The `foo()` API is hard to use.\nerror[E0001]: example"
+    cleaned = clean_text(value)
+    assert cleaned == value
+
+
+def test_cleaning_collapses_stack_trace_without_consuming_following_prose():
+    value = (
+        "The crash is easy to reproduce.\n\n"
+        "stack backtrace:\n"
+        "   0: example::first\n"
+        "   1: example::second\n\n"
+        "The debugging experience is frustrating."
+    )
+    cleaned = clean_text(value)
+    assert "[STACK_TRACE_REMOVED: 3 lines]" in cleaned
+    assert "example::first" not in cleaned
+    assert "The debugging experience is frustrating." in cleaned
+
+
+def test_cleaning_collapses_long_compiler_output_run():
+    value = (
+        "The suggestion is misleading.\n"
+        "error[E0001]: example\n"
+        " --> src/main.rs:1:1\n"
+        "1 | broken()\n"
+        "The documentation is otherwise excellent."
+    )
+    cleaned = clean_text(value)
+    assert "[TECHNICAL_OUTPUT_REMOVED: 3 lines]" in cleaned
+    assert "The suggestion is misleading." in cleaned
+    assert "The documentation is otherwise excellent." in cleaned
+
+
+def test_cleaning_removes_presentation_wrappers_without_removing_prose():
+    value = (
+        "<details>\n<summary>Long output</summary>\n"
+        "```text\nerror\n```\n</details>\n"
+        "The error message is confusing.\n</body>\n</html>"
+    )
+    cleaned = clean_text(value)
+    assert "details" not in cleaned
+    assert "summary" not in cleaned
+    assert "</body>" not in cleaned
+    assert "The error message is confusing." in cleaned
+
+
+def test_corpus_keeps_full_target_but_sends_denoised_text_to_model():
+    row = make_corpus_row(
+        source(
+            "issue",
+            body="This is frustrating.\n\n```rust\nfn main() {}\n```",
+        )
+    )
+    assert "fn main()" in row["target_text"]
+    assert "fn main()" not in row["clean_text"]
+    assert "[CODE_BLOCK_REMOVED: 1 lines]" in row["clean_text"]
+    assert row["clean_text"] in row["model_input"]
+    assert row["cleaning_version"] == CLEANING_VERSION == "clean-v2"

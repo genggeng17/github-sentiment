@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 
+from corpus_builder import CLEANING_VERSION
 from storage import Storage
 
 from .prompts import PROMPT_VERSION, SYSTEM_PROMPT, TAXONOMY_VERSION
@@ -132,7 +133,10 @@ class DeepSeekLabeler:
             fetch_batch_size,
         )
         if sample_set_id is None:
-            batches = self.storage.iter_unannotated_corpus(*iterator_args)
+            batches = self.storage.iter_unannotated_corpus(
+                *iterator_args,
+                cleaning_version=CLEANING_VERSION,
+            )
         else:
             batches = self.storage.iter_unannotated_corpus(
                 *iterator_args,

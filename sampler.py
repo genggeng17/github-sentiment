@@ -4,6 +4,7 @@ import hashlib
 import heapq
 from typing import Any
 
+from corpus_builder import CLEANING_VERSION
 from storage import Storage
 from storage.models import utcnow
 
@@ -28,7 +29,10 @@ class CorpusSampler:
     ) -> tuple[int, list[dict[str, Any]]]:
         eligible = 0
         selected: list[tuple[int, int, dict[str, Any]]] = []
-        for batch in self.storage.iter_sample_candidates(repository_id):
+        for batch in self.storage.iter_sample_candidates(
+            repository_id,
+            cleaning_version=CLEANING_VERSION,
+        ):
             for row in batch:
                 eligible += 1
                 score = self._score(seed, repository_id, row)
@@ -66,6 +70,11 @@ class CorpusSampler:
             seed,
         )
         if completed_stats is not None:
+            if completed_stats.get("cleaning_version") != CLEANING_VERSION:
+                raise ValueError(
+                    f"采样集 {name!r} 使用的清洗版本不是 {CLEANING_VERSION}；"
+                    "请使用新的采样集名称"
+                )
             return {
                 **completed_stats,
                 "sample_set_id": sample_set_id,
@@ -77,6 +86,7 @@ class CorpusSampler:
             "name": name,
             "per_repository_limit": per_repository_limit,
             "seed": seed,
+            "cleaning_version": CLEANING_VERSION,
             "repositories": {},
             "eligible": 0,
             "selected": 0,
