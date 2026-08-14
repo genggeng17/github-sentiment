@@ -43,10 +43,10 @@ def test_deepseek_client_requests_json_mode():
         client.close()
     assert captured["response_format"] == {"type": "json_object"}
     prompt = captured["messages"][0]["content"]
-    assert "CONTEXT 仅用于消歧" in prompt
-    assert "只输出 TARGET 明确提及的标签" in prompt
-    assert "未提及的标签不要输出" in prompt
-    assert "runtime_performance：程序运行速度" in prompt
+    assert "CONTEXT 可用于确定 TARGET 所指的对象" in prompt
+    assert "输出所有且仅输出 TARGET 明确讨论的方面" in prompt
+    assert "不得仅根据工具名" in prompt
+    assert "runtime_performance：讨论程序运行阶段" in prompt
     assert "results 必须与输入 items 一一对应" in prompt
     user_payload = json.loads(captured["messages"][1]["content"])
     assert user_payload == {
