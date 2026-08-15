@@ -18,9 +18,9 @@ GitHub 数据采集 → 文本清洗与去重 → DeepSeek 标注 → 人工抽�
 | --- | --- | --- | --- |
 | GitHub 采集 | `GITHUB_API_VERSION` | `2022-11-28` | 固定 GitHub REST API 契约；不参与语料或标注唯一键 |
 | 语料构建 | `CLEANING_VERSION` / `corpus.cleaning_version` | `clean-v2` | 标识清洗和模型输入构造规则，并参与 `content_hash` 计算 |
-| 采样 | `corpus_sample_sets.name` | 运行时指定，如 `rust-v1` | 标识不可变采样集；还需结合每仓库上限和 `seed` 追溯 |
+| 采样 | `corpus_sample_sets.name` | 运行时指定，如 `rust-v1` | 标识不可变采样集；还需结合每仓库上限、`seed` 和候选语料字符上限追溯 |
 | 标签体系 | `TAXONOMY_VERSION` / `llm_annotations.taxonomy_version` | `rust-aspects-v2` | 标识允许输出的方面及其定义 |
-| Prompt | `PROMPT_VERSION` / `llm_annotations.prompt_version` | `aspect-sentiment-zh-v4` | 标识提示词、输入输出协议和标注规则 |
+| Prompt | `PROMPT_VERSION` / `llm_annotations.prompt_version` | `aspect-sentiment-zh-v7` | 标识提示词、输入输出协议和标注规则 |
 | LLM | `DEEPSEEK_MODEL` / `llm_annotations.model_name` | `deepseek-v4-flash` | 标识实际调用的模型；可由 `.env` 覆盖 |
 | BERT | `bert_predictions.model_version` | 暂无固定值 | 为后续 BERT/ONNX 推理预留，当前阶段尚未提供具体模型 |
 
@@ -33,6 +33,9 @@ GitHub 数据采集 → 文本清洗与去重 → DeepSeek 标注 → 人工抽�
 | 2026-07-30 | 引入版本化采样集 | 采样集名称、每仓库上限和随机种子共同确定训练候选快照；同名采样集不允许用不同参数覆盖 |
 | 2026-08-04 | `aspect-sentiment-zh-v4`；`deepseek-v4-flash` | Prompt 改为批量提交并按 `corpus_id` 对齐结果；默认模型同步更新 |
 | 2026-08-15 | `clean-v2` | 完整保留 `raw_text` 和 `target_text`；仅在 `clean_text`/`model_input` 中用可审计占位符折叠 fenced 代码块、长日志、堆栈和空模板段落 |
+| 2026-08-15 | `aspect-sentiment-zh-v5` | 收紧 13 个方面的语义边界，并明确技术材料、上下文回应和多标签的判定规则 |
+| 2026-08-16 | `aspect-sentiment-zh-v6` | 增加不可信输入与批次隔离，统一确认和否定表达，规定同方面褒贬并存及 API/库生态边界 |
+| 2026-08-16 | `aspect-sentiment-zh-v7` | 改为一条语料一个独立请求和单条 JSON 响应；增加可控异步并发、固定 `user_id`、缓存命中统计及批量写库 |
 
 `GITHUB_API_VERSION=2022-11-28` 自项目建立后尚未变更。现有 Git 记录中没有
 `aspect-sentiment-v2`；版本号以数据库实际保存值为准，不应推测或补写缺失版本。升级

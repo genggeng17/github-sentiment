@@ -1,7 +1,7 @@
 from datetime import datetime
 
 import pytest
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, inspect, select, text
 from sqlalchemy.dialects import mysql
 from sqlalchemy.schema import CreateTable
 
@@ -26,6 +26,22 @@ def storage():
     value = Storage("", engine=engine)
     value.create_schema()
     yield value
+    engine.dispose()
+
+
+def test_create_schema_adds_sample_length_limit_to_existing_database():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(
+            text("CREATE TABLE corpus_sample_sets (id INTEGER PRIMARY KEY)")
+        )
+
+    Storage("", engine=engine).create_schema()
+
+    columns = {
+        column["name"] for column in inspect(engine).get_columns("corpus_sample_sets")
+    }
+    assert "max_model_input_chars" in columns
     engine.dispose()
 
 

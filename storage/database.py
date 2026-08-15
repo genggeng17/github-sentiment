@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Engine, Select, create_engine, delete, func, select, text, update
+from sqlalchemy import Engine, Select, create_engine, delete, func, inspect, select, text, update
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, sessionmaker
@@ -47,6 +47,18 @@ class Storage:
 
     def create_schema(self) -> None:
         Base.metadata.create_all(self.engine)
+        inspector = inspect(self.engine)
+        if "corpus_sample_sets" not in inspector.get_table_names():
+            return
+        columns = {column["name"] for column in inspector.get_columns("corpus_sample_sets")}
+        if "max_model_input_chars" not in columns:
+            with self.engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE corpus_sample_sets "
+                        "ADD COLUMN max_model_input_chars INTEGER NULL"
+                    )
+                )
 
     @contextmanager
     def pipeline_lock(self) -> Iterator[None]:
@@ -639,6 +651,7 @@ class Storage:
         repository_id: int,
         *,
         cleaning_version: str | None = None,
+        max_model_input_chars: int | None = None,
         batch_size: int = 1000,
     ) -> Iterator[list[dict[str, Any]]]:
         queries: list[Select[Any]] = [
@@ -679,6 +692,15 @@ class Storage:
             for query in queries:
                 if cleaning_version is not None:
                     query = query.where(Corpus.cleaning_version == cleaning_version)
+                if max_model_input_chars is not None:
+                    length_function = (
+                        func.char_length
+                        if self.engine.dialect.name == "mysql"
+                        else func.length
+                    )
+                    query = query.where(
+                        length_function(Corpus.model_input) <= max_model_input_chars
+                    )
                 last_id = 0
                 while True:
                     rows = (
@@ -704,6 +726,7 @@ class Storage:
         name: str,
         per_repository_limit: int,
         seed: str,
+        max_model_input_chars: int | None,
     ) -> tuple[int, dict[str, Any] | None]:
         with self.sessions.begin() as session:
             existing = session.scalar(
@@ -713,6 +736,7 @@ class Storage:
                 if (
                     existing.per_repository_limit != per_repository_limit
                     or existing.seed != seed
+                    or existing.max_model_input_chars != max_model_input_chars
                 ):
                     raise ValueError(
                         f"采样集 {name!r} 已存在但参数不同；请使用新的采样集名称"
@@ -732,6 +756,7 @@ class Storage:
                 name=name,
                 per_repository_limit=per_repository_limit,
                 seed=seed,
+                max_model_input_chars=max_model_input_chars,
                 status="building",
                 stats={},
             )
@@ -817,22 +842,22 @@ class Storage:
         cleaning_version: str | None = None,
     ) -> Iterator[list[dict[str, Any]]]:
         last_id = 0
-        with self.sessions() as session:
-            while True:
-                already = select(LlmAnnotation.corpus_id).where(
-                    LlmAnnotation.taxonomy_version == taxonomy_version,
-                    LlmAnnotation.prompt_version == prompt_version,
-                    LlmAnnotation.model_name == model_name,
-                    LlmAnnotation.status == "succeeded",
-                )
-                query = select(Corpus.id, Corpus.model_input)
-                if sample_set_id is not None:
-                    query = query.join(
-                        CorpusSampleItem,
-                        CorpusSampleItem.corpus_id == Corpus.id,
-                    ).where(CorpusSampleItem.sample_set_id == sample_set_id)
-                elif cleaning_version is not None:
-                    query = query.where(Corpus.cleaning_version == cleaning_version)
+        while True:
+            already = select(LlmAnnotation.corpus_id).where(
+                LlmAnnotation.taxonomy_version == taxonomy_version,
+                LlmAnnotation.prompt_version == prompt_version,
+                LlmAnnotation.model_name == model_name,
+                LlmAnnotation.status == "succeeded",
+            )
+            query = select(Corpus.id, Corpus.model_input)
+            if sample_set_id is not None:
+                query = query.join(
+                    CorpusSampleItem,
+                    CorpusSampleItem.corpus_id == Corpus.id,
+                ).where(CorpusSampleItem.sample_set_id == sample_set_id)
+            elif cleaning_version is not None:
+                query = query.where(Corpus.cleaning_version == cleaning_version)
+            with self.sessions() as session:
                 rows = (
                     session.execute(
                         query.where(
@@ -846,17 +871,21 @@ class Storage:
                     .mappings()
                     .all()
                 )
-                if not rows:
-                    break
-                batch = [dict(row) for row in rows]
-                yield batch
-                last_id = batch[-1]["id"]
+            if not rows:
+                break
+            batch = [dict(row) for row in rows]
+            yield batch
+            last_id = batch[-1]["id"]
 
     def save_annotation(self, row: dict[str, Any]) -> None:
-        row = {**row, "updated_at": utcnow()}
+        self.save_annotations([row])
+
+    def save_annotations(self, rows: list[dict[str, Any]]) -> None:
+        updated_at = utcnow()
+        prepared = [{**row, "updated_at": updated_at} for row in rows]
         self._upsert(
             LlmAnnotation,
-            [row],
+            prepared,
             ["corpus_id", "taxonomy_version", "prompt_version", "model_name"],
             ["raw_response", "parsed_result", "status", "error_message", "updated_at"],
         )

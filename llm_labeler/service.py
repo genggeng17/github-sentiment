@@ -1,21 +1,51 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import random
-import time
-from collections.abc import Callable
+import re
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
+from config import MAX_LLM_CONCURRENCY
 from corpus_builder import CLEANING_VERSION
 from storage import Storage
 
 from .prompts import PROMPT_VERSION, SYSTEM_PROMPT, TAXONOMY_VERSION
-from .validation import AnnotationValidationError, validate_batch_annotations
+from .validation import AnnotationValidationError, validate_annotation
 
 logger = logging.getLogger(__name__)
+
+RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionResult:
+    content: str
+    cache_hit_tokens: int = 0
+    cache_miss_tokens: int = 0
+    retries: int = 0
+    rate_limited: int = 0
+    server_errors: int = 0
+
+
+class DeepSeekRequestError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        retries: int = 0,
+        rate_limited: int = 0,
+        server_errors: int = 0,
+    ):
+        super().__init__(message)
+        self.retries = retries
+        self.rate_limited = rate_limited
+        self.server_errors = server_errors
 
 
 class DeepSeekClient:
@@ -25,98 +55,266 @@ class DeepSeekClient:
         base_url: str,
         model: str,
         *,
+        concurrency: int = 20,
+        user_id: str = "rust-sentiment-labeler",
         timeout_seconds: int = 60,
         max_retries: int = 3,
-        sleep: Callable[[float], None] = time.sleep,
-        transport: httpx.BaseTransport | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        transport: httpx.AsyncBaseTransport | None = None,
     ):
+        if not 1 <= concurrency <= MAX_LLM_CONCURRENCY:
+            raise ValueError(
+                f"DeepSeek 并发量必须在 1 到 {MAX_LLM_CONCURRENCY} 之间"
+            )
+        normalized_user_id = user_id.strip()
+        if normalized_user_id and (
+            len(normalized_user_id) > 512
+            or re.fullmatch(r"[a-zA-Z0-9\-_]+", normalized_user_id) is None
+        ):
+            raise ValueError("DeepSeek user_id 只能包含字母、数字、连字符和下划线")
         self.model = model
         self.max_retries = max_retries
+        self.user_id = normalized_user_id
         self._sleep = sleep
-        self._client = httpx.Client(
+        self._cooldown_lock = asyncio.Lock()
+        self._cooldown_until = 0.0
+        self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             timeout=timeout_seconds,
+            limits=httpx.Limits(
+                max_connections=concurrency,
+                max_keepalive_connections=concurrency,
+            ),
             transport=transport,
         )
 
-    def close(self) -> None:
-        self._client.close()
+    async def close(self) -> None:
+        await self._client.aclose()
 
-    def complete_batch(self, corpus: list[dict[str, Any]]) -> str:
-        if not corpus:
-            raise ValueError("批量标注至少需要一条语料")
+    async def _wait_for_cooldown(self) -> None:
+        loop = asyncio.get_running_loop()
+        while True:
+            async with self._cooldown_lock:
+                delay = self._cooldown_until - loop.time()
+            if delay <= 0:
+                return
+            await self._sleep(delay)
+
+    async def _extend_cooldown(self, delay: float) -> None:
+        loop = asyncio.get_running_loop()
+        async with self._cooldown_lock:
+            self._cooldown_until = max(self._cooldown_until, loop.time() + delay)
+
+    @staticmethod
+    def _retry_delay(response: httpx.Response | None, attempt: int) -> float:
+        retry_after = response.headers.get("Retry-After") if response is not None else None
+        if retry_after:
+            try:
+                return max(0.0, float(retry_after))
+            except ValueError:
+                pass
+        return 2**attempt + random.random()
+
+    async def complete(self, corpus: dict[str, Any]) -> CompletionResult:
         model_input = json.dumps(
-            {
-                "items": [
-                    {
-                        "corpus_id": item["id"],
-                        "model_input": item["model_input"],
-                    }
-                    for item in corpus
-                ]
-            },
+            {"model_input": corpus["model_input"]},
             ensure_ascii=False,
             separators=(",", ":"),
         )
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": model_input},
             ],
             "response_format": {"type": "json_object"},
+            "thinking": {"type": "disabled"},
             "temperature": 0,
-            "max_tokens": min(8192, max(800, 400 * len(corpus))),
+            "max_tokens": 800,
             "stream": False,
         }
+        if self.user_id:
+            payload["user_id"] = self.user_id
+
         last_error: Exception | None = None
+        rate_limited = 0
+        server_errors = 0
         for attempt in range(self.max_retries + 1):
+            await self._wait_for_cooldown()
+            response: httpx.Response | None = None
             try:
-                response = self._client.post("/chat/completions", json=payload)
-                if response.status_code in {429, 500, 502, 503, 504}:
+                response = await self._client.post("/chat/completions", json=payload)
+                if response.status_code in RETRYABLE_STATUS_CODES:
                     raise httpx.HTTPStatusError(
-                        "DeepSeek 暂时不可用", request=response.request, response=response
+                        "DeepSeek 暂时不可用",
+                        request=response.request,
+                        response=response,
                     )
                 response.raise_for_status()
-                choice = response.json()["choices"][0]
+                body = response.json()
+                choice = body["choices"][0]
                 if choice.get("finish_reason") == "length":
-                    raise ValueError("DeepSeek 批量响应因达到长度上限而被截断")
+                    raise ValueError("DeepSeek 单条响应因达到长度上限而被截断")
                 content = choice["message"]["content"]
                 if not isinstance(content, str) or not content.strip():
                     raise ValueError("DeepSeek 返回空内容")
-                return content.strip()
+                usage = body.get("usage") or {}
+                prompt_details = usage.get("prompt_tokens_details") or {}
+                cache_hit_tokens = usage.get(
+                    "prompt_cache_hit_tokens",
+                    prompt_details.get("cached_tokens", 0),
+                )
+                cache_miss_tokens = usage.get(
+                    "prompt_cache_miss_tokens",
+                    max(0, usage.get("prompt_tokens", 0) - cache_hit_tokens),
+                )
+                return CompletionResult(
+                    content=content.strip(),
+                    cache_hit_tokens=int(cache_hit_tokens or 0),
+                    cache_miss_tokens=int(cache_miss_tokens or 0),
+                    retries=attempt,
+                    rate_limited=rate_limited,
+                    server_errors=server_errors,
+                )
             except (httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError) as exc:
                 last_error = exc
                 status = (
-                    exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
-                )
-                if status is not None and status not in {429, 500, 502, 503, 504}:
-                    raise RuntimeError(f"DeepSeek 不可恢复错误: HTTP {status}") from exc
-                if attempt >= self.max_retries:
-                    break
-                retry_after = (
-                    exc.response.headers.get("Retry-After")
+                    exc.response.status_code
                     if isinstance(exc, httpx.HTTPStatusError)
                     else None
                 )
-                delay = (
-                    float(retry_after)
-                    if retry_after and retry_after.isdigit()
-                    else 2**attempt + random.random()
+                if status is not None and status not in RETRYABLE_STATUS_CODES:
+                    raise DeepSeekRequestError(
+                        f"DeepSeek 不可恢复错误: HTTP {status}",
+                        retries=attempt,
+                        rate_limited=rate_limited,
+                        server_errors=server_errors,
+                    ) from exc
+                if status == 429:
+                    rate_limited += 1
+                elif status is not None and status >= 500:
+                    server_errors += 1
+                if attempt >= self.max_retries:
+                    break
+                delay = self._retry_delay(response, attempt)
+                if status in {429, 503}:
+                    await self._extend_cooldown(delay)
+                logger.warning(
+                    "DeepSeek 语料 %s 调用失败，%.1f 秒后重试",
+                    corpus["id"],
+                    delay,
                 )
-                logger.warning("DeepSeek 调用失败，%.1f 秒后重试", delay)
-                self._sleep(delay)
-        raise RuntimeError(f"DeepSeek 请求重试耗尽: {last_error}") from last_error
+                await self._sleep(delay)
+        raise DeepSeekRequestError(
+            f"DeepSeek 请求重试耗尽: {last_error}",
+            retries=self.max_retries,
+            rate_limited=rate_limited,
+            server_errors=server_errors,
+        ) from last_error
 
 
 class DeepSeekLabeler:
-    def __init__(self, client: DeepSeekClient, storage: Storage, batch_size: int = 20):
+    def __init__(
+        self,
+        client: DeepSeekClient,
+        storage: Storage,
+        *,
+        concurrency: int = 20,
+        cache_warmup_requests: int = 2,
+        fetch_size: int = 200,
+        write_batch_size: int = 50,
+    ):
+        if not 1 <= concurrency <= MAX_LLM_CONCURRENCY:
+            raise ValueError(
+                f"LLM 并发量必须在 1 到 {MAX_LLM_CONCURRENCY} 之间"
+            )
+        if fetch_size <= 0:
+            raise ValueError("语料读取批量必须大于 0")
+        if write_batch_size <= 0:
+            raise ValueError("标注写入批量必须大于 0")
+        if cache_warmup_requests < 0:
+            raise ValueError("缓存预热请求数不能小于 0")
         self.client = client
         self.storage = storage
-        self.batch_size = batch_size
+        self.concurrency = concurrency
+        self.cache_warmup_requests = cache_warmup_requests
+        self.fetch_size = max(fetch_size, concurrency)
+        self.write_batch_size = write_batch_size
 
-    def label_pending(
+    async def _label_one(
+        self,
+        corpus: dict[str, Any],
+        semaphore: asyncio.Semaphore,
+        in_flight: dict[str, int],
+    ) -> tuple[dict[str, Any], dict[str, int]]:
+        raw_response: str | None = None
+        metrics = {
+            "retries": 0,
+            "rate_limited": 0,
+            "server_errors": 0,
+            "cache_hit_tokens": 0,
+            "cache_miss_tokens": 0,
+        }
+        try:
+            async with semaphore:
+                in_flight["current"] += 1
+                in_flight["maximum"] = max(
+                    in_flight["maximum"], in_flight["current"]
+                )
+                try:
+                    completion = await self.client.complete(corpus)
+                finally:
+                    in_flight["current"] -= 1
+            raw_response = completion.content
+            metrics.update(
+                retries=completion.retries,
+                rate_limited=completion.rate_limited,
+                server_errors=completion.server_errors,
+                cache_hit_tokens=completion.cache_hit_tokens,
+                cache_miss_tokens=completion.cache_miss_tokens,
+            )
+            parsed = validate_annotation(raw_response)
+            status = "succeeded"
+            error = None
+        except DeepSeekRequestError as exc:
+            metrics.update(
+                retries=exc.retries,
+                rate_limited=exc.rate_limited,
+                server_errors=exc.server_errors,
+            )
+            parsed = None
+            status = "failed"
+            error = str(exc)
+        except (
+            AnnotationValidationError,
+            RuntimeError,
+            ValueError,
+            KeyError,
+            IndexError,
+            TypeError,
+        ) as exc:
+            parsed = None
+            status = "failed"
+            error = str(exc)
+
+        if error is not None:
+            logger.error("语料 %s 标注失败: %s", corpus["id"], error)
+        return (
+            {
+                "corpus_id": corpus["id"],
+                "taxonomy_version": TAXONOMY_VERSION,
+                "prompt_version": PROMPT_VERSION,
+                "model_name": self.client.model,
+                "raw_response": raw_response,
+                "parsed_result": parsed,
+                "status": status,
+                "error_message": error,
+            },
+            metrics,
+        )
+
+    async def label_pending_async(
         self,
         *,
         limit: int | None = None,
@@ -124,13 +322,24 @@ class DeepSeekLabeler:
     ) -> dict[str, int]:
         if limit is not None and limit <= 0:
             raise ValueError("标注数量上限必须大于 0")
-        stats = {"read": 0, "succeeded": 0, "failed": 0}
-        fetch_batch_size = min(self.batch_size, limit) if limit is not None else self.batch_size
+        stats = {
+            "read": 0,
+            "requests": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "retries": 0,
+            "rate_limited": 0,
+            "server_errors": 0,
+            "cache_hit_tokens": 0,
+            "cache_miss_tokens": 0,
+            "max_in_flight": 0,
+        }
+        fetch_size = min(self.fetch_size, limit) if limit is not None else self.fetch_size
         iterator_args = (
             TAXONOMY_VERSION,
             PROMPT_VERSION,
             self.client.model,
-            fetch_batch_size,
+            fetch_size,
         )
         if sample_set_id is None:
             batches = self.storage.iter_unannotated_corpus(
@@ -142,60 +351,60 @@ class DeepSeekLabeler:
                 *iterator_args,
                 sample_set_id=sample_set_id,
             )
+
+        semaphore = asyncio.Semaphore(self.concurrency)
+        in_flight = {"current": 0, "maximum": 0}
+        warmup_remaining = self.cache_warmup_requests
+        write_buffer: list[dict[str, Any]] = []
+
+        async def record_result(
+            result: tuple[dict[str, Any], dict[str, int]],
+        ) -> None:
+            row, metrics = result
+            stats["requests"] += 1
+            stats[row["status"]] += 1
+            for key, value in metrics.items():
+                stats[key] += value
+            stats["max_in_flight"] = max(
+                stats["max_in_flight"], in_flight["maximum"]
+            )
+            write_buffer.append(row)
+            if len(write_buffer) >= self.write_batch_size:
+                rows_to_write = list(write_buffer)
+                write_buffer.clear()
+                await asyncio.to_thread(self.storage.save_annotations, rows_to_write)
+
         for batch in batches:
             remaining = limit - stats["read"] if limit is not None else len(batch)
             current_batch = batch[:remaining]
             if not current_batch:
                 return stats
             stats["read"] += len(current_batch)
-            raw_response: str | None = None
-            batch_error: str | None = None
-            try:
-                raw_response = self.client.complete_batch(current_batch)
-                batch_results = validate_batch_annotations(
-                    raw_response,
-                    [corpus["id"] for corpus in current_batch],
-                )
-            except (AnnotationValidationError, RuntimeError, ValueError, KeyError) as exc:
-                logger.error(
-                    "批量语料 %s 标注失败: %s",
-                    [corpus["id"] for corpus in current_batch],
-                    exc,
-                )
-                batch_error = str(exc)
-                batch_results = None
+            warmup_count = min(warmup_remaining, len(current_batch))
+            for corpus in current_batch[:warmup_count]:
+                await record_result(await self._label_one(corpus, semaphore, in_flight))
+            warmup_remaining -= warmup_count
 
-            for corpus in current_batch:
-                if batch_results is None:
-                    parsed = None
-                    status = "failed"
-                    error = batch_error
-                    item_raw_response = raw_response
-                    stats["failed"] += 1
-                else:
-                    result = batch_results[corpus["id"]]
-                    parsed = result.parsed_result
-                    item_raw_response = result.raw_response
-                    error = result.error_message
-                    if error is None:
-                        status = "succeeded"
-                        stats["succeeded"] += 1
-                    else:
-                        status = "failed"
-                        stats["failed"] += 1
-                        logger.error("语料 %s 标注失败: %s", corpus["id"], error)
-                self.storage.save_annotation(
-                    {
-                        "corpus_id": corpus["id"],
-                        "taxonomy_version": TAXONOMY_VERSION,
-                        "prompt_version": PROMPT_VERSION,
-                        "model_name": self.client.model,
-                        "raw_response": item_raw_response,
-                        "parsed_result": parsed,
-                        "status": status,
-                        "error_message": error,
-                    }
-                )
+            tasks = [
+                asyncio.create_task(self._label_one(corpus, semaphore, in_flight))
+                for corpus in current_batch[warmup_count:]
+            ]
+            for future in asyncio.as_completed(tasks):
+                await record_result(await future)
+            if write_buffer:
+                rows_to_write = list(write_buffer)
+                write_buffer.clear()
+                await asyncio.to_thread(self.storage.save_annotations, rows_to_write)
             if limit is not None and stats["read"] >= limit:
                 return stats
         return stats
+
+    def label_pending(
+        self,
+        *,
+        limit: int | None = None,
+        sample_set_id: int | None = None,
+    ) -> dict[str, int]:
+        return asyncio.run(
+            self.label_pending_async(limit=limit, sample_set_id=sample_set_id)
+        )

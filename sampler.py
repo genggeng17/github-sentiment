@@ -26,12 +26,14 @@ class CorpusSampler:
         repository_id: int,
         limit: int,
         seed: str,
+        max_model_input_chars: int | None,
     ) -> tuple[int, list[dict[str, Any]]]:
         eligible = 0
         selected: list[tuple[int, int, dict[str, Any]]] = []
         for batch in self.storage.iter_sample_candidates(
             repository_id,
             cleaning_version=CLEANING_VERSION,
+            max_model_input_chars=max_model_input_chars,
         ):
             for row in batch:
                 eligible += 1
@@ -56,6 +58,7 @@ class CorpusSampler:
         *,
         per_repository_limit: int = 5000,
         seed: str = "0",
+        max_model_input_chars: int | None = None,
     ) -> dict[str, Any]:
         name = name.strip()
         seed = str(seed)
@@ -63,11 +66,14 @@ class CorpusSampler:
             raise ValueError("采样集名称不能为空")
         if per_repository_limit <= 0:
             raise ValueError("每仓库采样上限必须大于 0")
+        if max_model_input_chars is not None and max_model_input_chars <= 0:
+            raise ValueError("候选语料字符长度上限必须大于 0")
 
         sample_set_id, completed_stats = self.storage.prepare_sample_set(
             name,
             per_repository_limit,
             seed,
+            max_model_input_chars,
         )
         if completed_stats is not None:
             if completed_stats.get("cleaning_version") != CLEANING_VERSION:
@@ -86,6 +92,7 @@ class CorpusSampler:
             "name": name,
             "per_repository_limit": per_repository_limit,
             "seed": seed,
+            "max_model_input_chars": max_model_input_chars,
             "cleaning_version": CLEANING_VERSION,
             "repositories": {},
             "eligible": 0,
@@ -100,6 +107,7 @@ class CorpusSampler:
                     repository_id,
                     per_repository_limit,
                     seed,
+                    max_model_input_chars,
                 )
                 rows = [
                     {

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
 import sys
 from collections.abc import Callable
 from typing import Any
 
-from config import Settings, normalize_repository_name
+from config import MAX_LLM_CONCURRENCY, Settings, normalize_repository_name
 from corpus_builder import CorpusBuilder
 from crawler import CollectionLimits, GitHubClient, GitHubCollector
 from llm_labeler.service import DeepSeekClient, DeepSeekLabeler
@@ -25,6 +26,13 @@ def positive_int(value: str) -> int:
         raise argparse.ArgumentTypeError("必须是整数") from exc
     if parsed <= 0:
         raise argparse.ArgumentTypeError("必须大于 0")
+    return parsed
+
+
+def llm_concurrency(value: str) -> int:
+    parsed = positive_int(value)
+    if parsed > MAX_LLM_CONCURRENCY:
+        raise argparse.ArgumentTypeError(f"不能大于 {MAX_LLM_CONCURRENCY}")
     return parsed
 
 
@@ -133,11 +141,13 @@ class Pipeline:
         *,
         per_repository_limit: int = 5000,
         seed: str = "0",
+        max_model_input_chars: int | None = None,
     ) -> dict[str, Any]:
         return CorpusSampler(self.storage).build(
             name,
             per_repository_limit=per_repository_limit,
             seed=seed,
+            max_model_input_chars=max_model_input_chars,
         )
 
     def label(
@@ -145,24 +155,39 @@ class Pipeline:
         *,
         limit: int | None = None,
         sample_name: str | None = None,
+        concurrency: int | None = None,
     ) -> dict[str, int]:
         self.settings.require_labeling()
         sample_set_id = (
             self.storage.completed_sample_set_id(sample_name) if sample_name else None
         )
-        client = DeepSeekClient(
-            self.settings.deepseek_api_key,
-            self.settings.deepseek_base_url,
-            self.settings.deepseek_model,
-            timeout_seconds=max(60, self.settings.http_timeout_seconds),
-            max_retries=self.settings.http_max_retries,
+        effective_concurrency = (
+            self.settings.llm_concurrency if concurrency is None else concurrency
         )
-        try:
-            return DeepSeekLabeler(
-                client, self.storage, batch_size=self.settings.label_batch_size
-            ).label_pending(limit=limit, sample_set_id=sample_set_id)
-        finally:
-            client.close()
+
+        async def run_labeler() -> dict[str, int]:
+            client = DeepSeekClient(
+                self.settings.deepseek_api_key,
+                self.settings.deepseek_base_url,
+                self.settings.deepseek_model,
+                concurrency=effective_concurrency,
+                user_id=self.settings.deepseek_user_id,
+                timeout_seconds=max(60, self.settings.http_timeout_seconds),
+                max_retries=self.settings.http_max_retries,
+            )
+            try:
+                return await DeepSeekLabeler(
+                    client,
+                    self.storage,
+                    concurrency=effective_concurrency,
+                    cache_warmup_requests=self.settings.llm_cache_warmup_requests,
+                    fetch_size=self.settings.label_fetch_size,
+                    write_batch_size=self.settings.annotation_write_batch_size,
+                ).label_pending_async(limit=limit, sample_set_id=sample_set_id)
+            finally:
+                await client.close()
+
+        return asyncio.run(run_labeler())
 
     def run_all(
         self,
@@ -173,6 +198,8 @@ class Pipeline:
         sample_name: str | None = None,
         sample_per_repository: int = 5000,
         sample_seed: str = "0",
+        sample_max_model_input_chars: int | None = None,
+        label_concurrency: int | None = None,
     ) -> dict[str, Any]:
         collection = (
             self.collect(run_id)
@@ -189,10 +216,16 @@ class Pipeline:
                 sample_name,
                 per_repository_limit=sample_per_repository,
                 seed=sample_seed,
+                max_model_input_chars=sample_max_model_input_chars,
             )
         if not skip_label:
             stats["llm_labeling"] = (
-                self.label() if sample_name is None else self.label(sample_name=sample_name)
+                self.label(concurrency=label_concurrency)
+                if sample_name is None
+                else self.label(
+                    sample_name=sample_name,
+                    concurrency=label_concurrency,
+                )
             )
         return stats
 
@@ -244,6 +277,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="0",
         help="确定性抽样种子；相同候选集和种子会产生相同结果",
     )
+    sample.add_argument(
+        "--max-model-input-chars",
+        type=positive_int,
+        default=None,
+        help="候选语料 model_input 字符数上限（默认不限制）",
+    )
     label = subparsers.add_parser("label", help="标注尚未成功标注的语料")
     label.add_argument(
         "--limit",
@@ -255,6 +294,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--sample",
         default=None,
         help="只标注指定的已完成采样集；默认沿用旧行为处理全部语料",
+    )
+    label.add_argument(
+        "--concurrency",
+        type=llm_concurrency,
+        default=None,
+        help=(
+            "同时进行的独立 DeepSeek 请求数（默认读取 LLM_CONCURRENCY，"
+            f"上限 {MAX_LLM_CONCURRENCY}）"
+        ),
     )
     run = subparsers.add_parser("run", help="执行采集、语料构建和 DeepSeek 标注")
     run.add_argument("--skip-label", action="store_true", help="跳过 DeepSeek 标注")
@@ -271,6 +319,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="每仓库采样上限（默认 5000）",
     )
     run.add_argument("--sample-seed", default="0", help="确定性抽样种子")
+    run.add_argument(
+        "--sample-max-model-input-chars",
+        type=positive_int,
+        default=None,
+        help="采样候选语料 model_input 字符数上限（默认不限制）",
+    )
+    run.add_argument(
+        "--label-concurrency",
+        type=llm_concurrency,
+        default=None,
+        help=(
+            "标注阶段同时进行的独立 DeepSeek 请求数（默认读取 LLM_CONCURRENCY，"
+            f"上限 {MAX_LLM_CONCURRENCY}）"
+        ),
+    )
     status = subparsers.add_parser("status", help="查询最近运行记录")
     status.add_argument("--limit", type=int, default=10)
     repo = subparsers.add_parser("repo", help="管理数据库中的仓库白名单")
@@ -327,10 +390,12 @@ def main(argv: list[str] | None = None) -> int:
             args.name,
             per_repository_limit=args.per_repository,
             seed=args.seed,
+            max_model_input_chars=args.max_model_input_chars,
         ),
         "label": lambda _run_id: pipeline.label(
             limit=args.limit,
             sample_name=args.sample,
+            concurrency=args.concurrency,
         ),
         "run": lambda run_id: pipeline.run_all(
             run_id,
@@ -339,6 +404,8 @@ def main(argv: list[str] | None = None) -> int:
             sample_name=args.sample_name,
             sample_per_repository=args.sample_per_repository,
             sample_seed=args.sample_seed,
+            sample_max_model_input_chars=args.sample_max_model_input_chars,
+            label_concurrency=args.label_concurrency,
         ),
     }
     run_id, status, stats = tracked_run(storage, args.command, callbacks[args.command])

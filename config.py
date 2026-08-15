@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
+MAX_LLM_CONCURRENCY = 500
+
 
 def normalize_repository_name(value: str) -> str:
     full_name = value.strip()
@@ -25,6 +27,24 @@ def _positive_int(name: str, default: int) -> int:
     return value
 
 
+def _nonnegative_int(name: str, default: int) -> int:
+    raw = os.getenv(name, str(default))
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} 必须是整数") from exc
+    if value < 0:
+        raise ValueError(f"{name} 不能小于 0")
+    return value
+
+
+def _bounded_positive_int(name: str, default: int, maximum: int) -> int:
+    value = _positive_int(name, default)
+    if value > maximum:
+        raise ValueError(f"{name} 不能大于 {maximum}")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     database_url: str
@@ -38,7 +58,11 @@ class Settings:
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"
-    label_batch_size: int = 20
+    deepseek_user_id: str = "rust-sentiment-labeler"
+    llm_concurrency: int = 20
+    llm_cache_warmup_requests: int = 2
+    label_fetch_size: int = 200
+    annotation_write_batch_size: int = 50
     log_level: str = "INFO"
 
     @classmethod
@@ -69,7 +93,19 @@ class Settings:
                 "/"
             ),
             deepseek_model=os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
-            label_batch_size=_positive_int("LABEL_BATCH_SIZE", 20),
+            deepseek_user_id=os.getenv(
+                "DEEPSEEK_USER_ID", "rust-sentiment-labeler"
+            ).strip(),
+            llm_concurrency=_bounded_positive_int(
+                "LLM_CONCURRENCY", 20, MAX_LLM_CONCURRENCY
+            ),
+            llm_cache_warmup_requests=_nonnegative_int(
+                "LLM_CACHE_WARMUP_REQUESTS", 2
+            ),
+            label_fetch_size=_positive_int("LABEL_FETCH_SIZE", 200),
+            annotation_write_batch_size=_positive_int(
+                "ANNOTATION_WRITE_BATCH_SIZE", 50
+            ),
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         )
 

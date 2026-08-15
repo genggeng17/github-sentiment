@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy import create_engine, func, select, update
 
 from corpus_builder import CLEANING_VERSION, CorpusBuilder
+from pipeline import build_parser
 from sampler import CorpusSampler
 from storage import Storage
 from storage.models import Corpus, CorpusSampleItem, CorpusSampleSet, Issue
@@ -74,6 +75,7 @@ def test_sample_is_capped_per_repository_and_is_reusable(storage):
         )
     assert counts == {first: 2, second: 2}
     assert sample_set.status == "completed"
+    assert sample_set.max_model_input_chars is None
 
     reused = sampler.build("rust-v1", per_repository_limit=2, seed="fixed")
     assert reused["reused"] is True
@@ -87,6 +89,76 @@ def test_sample_name_is_immutable(storage):
     sampler.build("rust-v1", per_repository_limit=2, seed="fixed")
     with pytest.raises(ValueError, match="参数不同"):
         sampler.build("rust-v1", per_repository_limit=3, seed="fixed")
+
+
+def test_sample_name_is_immutable_when_length_limit_changes(storage):
+    seed_repositories(storage)
+    sampler = CorpusSampler(storage)
+    sampler.build(
+        "rust-v1",
+        per_repository_limit=2,
+        seed="fixed",
+        max_model_input_chars=4000,
+    )
+    with pytest.raises(ValueError, match="参数不同"):
+        sampler.build(
+            "rust-v1",
+            per_repository_limit=2,
+            seed="fixed",
+            max_model_input_chars=8000,
+        )
+
+
+def test_sample_excludes_candidates_over_model_input_length_limit(storage):
+    seed_repositories(storage)
+    with storage.sessions.begin() as session:
+        longest_id = session.scalar(select(func.max(Corpus.id)))
+        session.execute(
+            update(Corpus)
+            .where(Corpus.id == longest_id)
+            .values(model_input="x" * 401)
+        )
+
+    stats = CorpusSampler(storage).build(
+        "rust-max-400",
+        per_repository_limit=100,
+        seed="fixed",
+        max_model_input_chars=400,
+    )
+
+    assert stats["max_model_input_chars"] == 400
+    assert stats["eligible"] == 7
+    assert stats["selected"] == 7
+    with storage.sessions() as session:
+        selected = set(session.scalars(select(CorpusSampleItem.corpus_id)))
+    assert longest_id not in selected
+
+
+def test_sample_cli_accepts_model_input_length_limit():
+    args = build_parser().parse_args(
+        [
+            "sample",
+            "--name",
+            "rust-max-4000",
+            "--max-model-input-chars",
+            "4000",
+        ]
+    )
+    assert args.max_model_input_chars == 4000
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "not-a-number"])
+def test_sample_cli_rejects_invalid_model_input_length_limit(value):
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            [
+                "sample",
+                "--name",
+                "rust-invalid",
+                "--max-model-input-chars",
+                value,
+            ]
+        )
 
 
 def test_annotation_iterator_only_returns_selected_corpus(storage):
