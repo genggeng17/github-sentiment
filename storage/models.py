@@ -157,6 +157,13 @@ class Corpus(Base):
             "source_type", "source_id", "content_hash", name="uq_corpus_source_version"
         ),
         Index("ix_corpus_hash", "content_hash"),
+        Index(
+            "ix_corpus_sampling",
+            "cleaning_version",
+            "source_type",
+            "duplicate_of_id",
+            "model_input_chars",
+        ),
     )
 
     id: Mapped[int] = mapped_column(ID_TYPE, primary_key=True, autoincrement=True)
@@ -167,6 +174,7 @@ class Corpus(Base):
     context_text: Mapped[str] = mapped_column(LONG_TEXT, nullable=False, default="")
     target_text: Mapped[str] = mapped_column(LONG_TEXT, nullable=False)
     model_input: Mapped[str] = mapped_column(LONG_TEXT, nullable=False)
+    model_input_chars: Mapped[int | None] = mapped_column(Integer)
     clean_text: Mapped[str] = mapped_column(LONG_TEXT, nullable=False)
     language: Mapped[str] = mapped_column(String(20), nullable=False, default="unknown")
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)

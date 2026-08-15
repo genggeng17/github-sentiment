@@ -17,7 +17,7 @@ GitHub 数据采集 → 文本清洗与去重 → DeepSeek 标注 → 人工抽�
 | 阶段 | 变量或字段 | 当前值 | 作用 |
 | --- | --- | --- | --- |
 | GitHub 采集 | `GITHUB_API_VERSION` | `2022-11-28` | 固定 GitHub REST API 契约；不参与语料或标注唯一键 |
-| 语料构建 | `CLEANING_VERSION` / `corpus.cleaning_version` | `clean-v2` | 标识清洗和模型输入构造规则，并参与 `content_hash` 计算 |
+| 语料构建 | `CLEANING_VERSION` / `corpus.cleaning_version` | `clean-v2` | 标识清洗和模型输入构造规则，并参与 `content_hash` 计算；`model_input_chars` 保存输入字符数供采样过滤 |
 | 采样 | `corpus_sample_sets.name` | 运行时指定，如 `rust-v1` | 标识不可变采样集；还需结合清洗版本、每仓库上限、`seed` 和候选语料字符上限追溯 |
 | 标签体系 | `TAXONOMY_VERSION` / `llm_annotations.taxonomy_version` | `rust-aspects-v2` | 标识允许输出的方面及其定义 |
 | Prompt | `PROMPT_VERSION` / `llm_annotations.prompt_version` | `aspect-sentiment-zh-v7` | 标识提示词、输入输出协议和标注规则 |

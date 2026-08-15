@@ -236,6 +236,7 @@ def make_corpus_row(source: dict[str, Any]) -> dict[str, Any]:
         "context_text": context,
         "target_text": target,
         "model_input": model_input,
+        "model_input_chars": len(model_input),
         "clean_text": label_target,
         "language": detect_language(target),
         "content_hash": digest,

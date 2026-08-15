@@ -94,6 +94,25 @@ def test_sample_is_capped_per_repository_and_is_reusable(storage):
         assert sample_set.cleaning_version == CLEANING_VERSION
 
 
+def test_sample_scans_all_repositories_in_one_stream(storage, monkeypatch):
+    first, second = seed_repositories(storage)
+    original = storage.iter_sample_candidates
+    calls = []
+
+    def tracked(repository_ids, **kwargs):
+        calls.append(tuple(repository_ids))
+        yield from original(repository_ids, **kwargs)
+
+    monkeypatch.setattr(storage, "iter_sample_candidates", tracked)
+    CorpusSampler(storage).build(
+        "rust-one-pass",
+        per_repository_limit=2,
+        seed="fixed",
+    )
+
+    assert calls == [(first, second)]
+
+
 def test_sample_name_is_immutable(storage):
     seed_repositories(storage)
     sampler = CorpusSampler(storage)
@@ -147,7 +166,7 @@ def test_sample_excludes_candidates_over_model_input_length_limit(storage):
         session.execute(
             update(Corpus)
             .where(Corpus.id == longest_id)
-            .values(model_input="x" * 401)
+            .values(model_input="x" * 401, model_input_chars=401)
         )
 
     stats = CorpusSampler(storage).build(

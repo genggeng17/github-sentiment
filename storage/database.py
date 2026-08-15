@@ -1,11 +1,23 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Engine, Select, create_engine, delete, func, inspect, select, text, update
+from sqlalchemy import (
+    Engine,
+    Select,
+    create_engine,
+    delete,
+    func,
+    inspect,
+    select,
+    text,
+    union_all,
+    update,
+)
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, sessionmaker
@@ -28,6 +40,8 @@ from .models import (
     UnresolvedCollectionItem,
     utcnow,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class PipelineAlreadyRunning(RuntimeError):
@@ -67,6 +81,68 @@ class Storage:
                         "ADD COLUMN max_model_input_chars INTEGER NULL"
                     )
                 )
+        corpus_columns = {
+            column["name"] for column in inspector.get_columns("corpus")
+        }
+        if "model_input_chars" not in corpus_columns:
+            with self.engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE corpus "
+                        "ADD COLUMN model_input_chars INTEGER NULL"
+                    )
+                )
+        self._backfill_model_input_chars()
+        corpus_indexes = {
+            index["name"] for index in inspect(self.engine).get_indexes("corpus")
+        }
+        if "ix_corpus_sampling" not in corpus_indexes:
+            with self.engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "CREATE INDEX ix_corpus_sampling ON corpus "
+                        "(cleaning_version, source_type, duplicate_of_id, "
+                        "model_input_chars)"
+                    )
+                )
+
+    def _backfill_model_input_chars(self, batch_size: int = 10000) -> None:
+        length_expression = (
+            "CHAR_LENGTH(model_input)"
+            if self.engine.dialect.name == "mysql"
+            else "length(model_input)"
+        )
+        update_lengths = text(
+            "UPDATE corpus "
+            f"SET model_input_chars = {length_expression} "
+            "WHERE id >= :first_id AND id <= :last_id "
+            "AND model_input_chars IS NULL"
+        )
+        last_id = 0
+        updated = 0
+        while True:
+            with self.engine.begin() as connection:
+                ids = connection.scalars(
+                    select(Corpus.id)
+                    .where(
+                        Corpus.id > last_id,
+                        Corpus.model_input_chars.is_(None),
+                    )
+                    .order_by(Corpus.id)
+                    .limit(batch_size)
+                ).all()
+                if not ids:
+                    break
+                connection.execute(
+                    update_lengths,
+                    {"first_id": ids[0], "last_id": ids[-1]},
+                )
+            last_id = ids[-1]
+            updated += len(ids)
+            if updated % 100000 == 0:
+                logger.info("已回填 %d 条 corpus 输入长度", updated)
+        if updated:
+            logger.info("corpus 输入长度回填完成，共 %d 条", updated)
 
     @contextmanager
     def pipeline_lock(self) -> Iterator[None]:
@@ -656,78 +732,90 @@ class Storage:
 
     def iter_sample_candidates(
         self,
-        repository_id: int,
+        repository_ids: Iterable[int],
         *,
         cleaning_version: str | None = None,
         max_model_input_chars: int | None = None,
-        batch_size: int = 1000,
+        batch_size: int = 5000,
     ) -> Iterator[list[dict[str, Any]]]:
+        repository_ids = tuple(repository_ids)
+        if not repository_ids:
+            return
         queries: list[Select[Any]] = [
-            select(Corpus.id, Corpus.source_type, Corpus.content_hash)
+            select(
+                Corpus.id,
+                Corpus.source_type,
+                Corpus.content_hash,
+                Issue.repository_id.label("repository_id"),
+            )
             .join(Issue, Issue.id == Corpus.source_id)
             .where(
                 Corpus.source_type == "issue",
-                Issue.repository_id == repository_id,
+                Issue.repository_id.in_(repository_ids),
             ),
-            select(Corpus.id, Corpus.source_type, Corpus.content_hash)
+            select(
+                Corpus.id,
+                Corpus.source_type,
+                Corpus.content_hash,
+                PullRequest.repository_id.label("repository_id"),
+            )
             .join(PullRequest, PullRequest.id == Corpus.source_id)
             .where(
                 Corpus.source_type == "pull_request",
-                PullRequest.repository_id == repository_id,
+                PullRequest.repository_id.in_(repository_ids),
             ),
-            select(Corpus.id, Corpus.source_type, Corpus.content_hash)
+            select(
+                Corpus.id,
+                Corpus.source_type,
+                Corpus.content_hash,
+                IssueComment.repository_id.label("repository_id"),
+            )
             .join(IssueComment, IssueComment.id == Corpus.source_id)
             .where(
                 Corpus.source_type == "issue_comment",
-                IssueComment.repository_id == repository_id,
+                IssueComment.repository_id.in_(repository_ids),
             ),
-            select(Corpus.id, Corpus.source_type, Corpus.content_hash)
+            select(
+                Corpus.id,
+                Corpus.source_type,
+                Corpus.content_hash,
+                PullRequestComment.repository_id.label("repository_id"),
+            )
             .join(PullRequestComment, PullRequestComment.id == Corpus.source_id)
             .where(
                 Corpus.source_type == "pr_issue_comment",
-                PullRequestComment.repository_id == repository_id,
+                PullRequestComment.repository_id.in_(repository_ids),
                 PullRequestComment.comment_type == "issue_comment",
             ),
-            select(Corpus.id, Corpus.source_type, Corpus.content_hash)
+            select(
+                Corpus.id,
+                Corpus.source_type,
+                Corpus.content_hash,
+                PullRequestComment.repository_id.label("repository_id"),
+            )
             .join(PullRequestComment, PullRequestComment.id == Corpus.source_id)
             .where(
                 Corpus.source_type == "pr_review_comment",
-                PullRequestComment.repository_id == repository_id,
+                PullRequestComment.repository_id.in_(repository_ids),
                 PullRequestComment.comment_type == "review_comment",
             ),
         ]
+        candidate_filters = [Corpus.duplicate_of_id.is_(None)]
+        if cleaning_version is not None:
+            candidate_filters.append(Corpus.cleaning_version == cleaning_version)
+        if max_model_input_chars is not None:
+            candidate_filters.append(
+                Corpus.model_input_chars <= max_model_input_chars
+            )
+        statement = union_all(
+            *(query.where(*candidate_filters) for query in queries)
+        )
         with self.sessions() as session:
-            for query in queries:
-                if cleaning_version is not None:
-                    query = query.where(Corpus.cleaning_version == cleaning_version)
-                if max_model_input_chars is not None:
-                    length_function = (
-                        func.char_length
-                        if self.engine.dialect.name == "mysql"
-                        else func.length
-                    )
-                    query = query.where(
-                        length_function(Corpus.model_input) <= max_model_input_chars
-                    )
-                last_id = 0
-                while True:
-                    rows = (
-                        session.execute(
-                            query.where(
-                                Corpus.id > last_id,
-                                Corpus.duplicate_of_id.is_(None),
-                            )
-                            .order_by(Corpus.id)
-                            .limit(batch_size)
-                        )
-                        .mappings()
-                        .all()
-                    )
-                    if not rows:
-                        break
-                    batch = [dict(row) for row in rows]
-                    yield batch
-                    last_id = batch[-1]["id"]
+            result = session.execute(
+                statement.execution_options(yield_per=batch_size)
+            ).mappings()
+            while rows := result.fetchmany(batch_size):
+                yield [dict(row) for row in rows]
 
     def available_cleaning_versions(self) -> tuple[str, ...]:
         with self.sessions() as session:
@@ -791,12 +879,14 @@ class Storage:
             session.flush()
             return sample_set.id, None
 
-    def insert_sample_items(self, rows: list[dict[str, Any]], batch_size: int = 500) -> int:
+    def insert_sample_items(
+        self, rows: list[dict[str, Any]], batch_size: int = 2000
+    ) -> int:
         written = 0
         for offset in range(0, len(rows), batch_size):
             batch = rows[offset : offset + batch_size]
             with self.sessions.begin() as session:
-                session.add_all(CorpusSampleItem(**row) for row in batch)
+                session.execute(CorpusSampleItem.__table__.insert(), batch)
             written += len(batch)
         return written
 
@@ -852,6 +942,7 @@ class Storage:
             ["source_type", "source_id", "content_hash"],
             [
                 "duplicate_of_id",
+                "model_input_chars",
                 "source_updated_at",
                 "updated_at",
             ],

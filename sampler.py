@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import heapq
+import logging
+import time
 from typing import Any
 
 from corpus_builder import CLEANING_VERSION
 from storage import Storage
 from storage.models import utcnow
+
+logger = logging.getLogger(__name__)
 
 
 class CorpusSampler:
@@ -21,36 +25,63 @@ class CorpusSampler:
         )
         return int.from_bytes(hashlib.sha256(material.encode("utf-8")).digest(), "big")
 
-    def _select_repository(
+    def _select_repositories(
         self,
-        repository_id: int,
+        repository_ids: tuple[int, ...],
         limit: int,
         seed: str,
         cleaning_version: str,
         max_model_input_chars: int | None,
-    ) -> tuple[int, list[dict[str, Any]]]:
-        eligible = 0
-        selected: list[tuple[int, int, dict[str, Any]]] = []
+    ) -> tuple[dict[int, int], dict[int, list[dict[str, Any]]]]:
+        eligible = {repository_id: 0 for repository_id in repository_ids}
+        selected: dict[int, list[tuple[int, int, dict[str, Any]]]] = {
+            repository_id: [] for repository_id in repository_ids
+        }
+        scanned = 0
+        started_at = time.monotonic()
         for batch in self.storage.iter_sample_candidates(
-            repository_id,
+            repository_ids,
             cleaning_version=cleaning_version,
             max_model_input_chars=max_model_input_chars,
         ):
             for row in batch:
-                eligible += 1
+                repository_id = row["repository_id"]
+                eligible[repository_id] += 1
+                scanned += 1
                 score = self._score(seed, repository_id, row)
                 entry = (-score, -row["id"], row)
-                if len(selected) < limit:
-                    heapq.heappush(selected, entry)
+                repository_selection = selected[repository_id]
+                if len(repository_selection) < limit:
+                    heapq.heappush(repository_selection, entry)
                     continue
-                worst_score = -selected[0][0]
-                worst_id = -selected[0][1]
+                worst_score = -repository_selection[0][0]
+                worst_id = -repository_selection[0][1]
                 if (score, row["id"]) < (worst_score, worst_id):
-                    heapq.heapreplace(selected, entry)
-        ordered = sorted(
-            (row for _, _, row in selected),
-            key=lambda row: (self._score(seed, repository_id, row), row["id"]),
+                    heapq.heapreplace(repository_selection, entry)
+            if scanned and scanned % 50000 < len(batch):
+                elapsed = max(time.monotonic() - started_at, 0.001)
+                logger.info(
+                    "采样扫描进度: 已检查 %d 条候选，速度 %.0f 条/秒",
+                    scanned,
+                    scanned / elapsed,
+                )
+        elapsed = max(time.monotonic() - started_at, 0.001)
+        logger.info(
+            "候选扫描完成: 共 %d 条，耗时 %.1f 秒，平均 %.0f 条/秒",
+            scanned,
+            elapsed,
+            scanned / elapsed,
         )
+        ordered = {
+            repository_id: sorted(
+                (row for _, _, row in repository_selection),
+                key=lambda row: (
+                    self._score(seed, repository_id, row),
+                    row["id"],
+                ),
+            )
+            for repository_id, repository_selection in selected.items()
+        }
         return eligible, ordered
 
     def build(
@@ -108,15 +139,21 @@ class CorpusSampler:
         }
         try:
             repositories = self.storage.list_repositories(enabled_only=True)
-            for repository in repositories:
-                repository_id = repository["id"]
-                eligible, selected = self._select_repository(
-                    repository_id,
+            repository_ids = tuple(repository["id"] for repository in repositories)
+            eligible_by_repository, selected_by_repository = (
+                self._select_repositories(
+                    repository_ids,
                     per_repository_limit,
                     seed,
                     cleaning_version,
                     max_model_input_chars,
                 )
+            )
+            all_rows: list[dict[str, Any]] = []
+            for repository in repositories:
+                repository_id = repository["id"]
+                eligible = eligible_by_repository[repository_id]
+                selected = selected_by_repository[repository_id]
                 rows = [
                     {
                         "sample_set_id": sample_set_id,
@@ -128,13 +165,15 @@ class CorpusSampler:
                     }
                     for rank, row in enumerate(selected, start=1)
                 ]
-                self.storage.insert_sample_items(rows)
+                all_rows.extend(rows)
                 stats["repositories"][repository["full_name"]] = {
                     "eligible": eligible,
                     "selected": len(rows),
                 }
                 stats["eligible"] += eligible
                 stats["selected"] += len(rows)
+            self.storage.insert_sample_items(all_rows)
+            logger.info("采样项写入完成: %d 条", len(all_rows))
             self.storage.finish_sample_set(sample_set_id, "completed", stats)
             return stats
         except Exception:

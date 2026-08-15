@@ -46,6 +46,42 @@ def test_create_schema_adds_sample_metadata_to_existing_database():
     engine.dispose()
 
 
+def test_create_schema_backfills_corpus_input_length_and_sampling_index():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE corpus ("
+                "id INTEGER PRIMARY KEY, "
+                "cleaning_version VARCHAR(30) NOT NULL, "
+                "source_type VARCHAR(30) NOT NULL, "
+                "duplicate_of_id BIGINT NULL, "
+                "model_input TEXT NOT NULL"
+                ")"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO corpus "
+                "(id, cleaning_version, source_type, duplicate_of_id, model_input) "
+                "VALUES (1, 'clean-v1', 'issue', NULL, '中文abc')"
+            )
+        )
+
+    Storage("", engine=engine).create_schema()
+
+    columns = {column["name"] for column in inspect(engine).get_columns("corpus")}
+    indexes = {index["name"] for index in inspect(engine).get_indexes("corpus")}
+    with engine.connect() as connection:
+        length = connection.scalar(
+            text("SELECT model_input_chars FROM corpus WHERE id = 1")
+        )
+    assert "model_input_chars" in columns
+    assert "ix_corpus_sampling" in indexes
+    assert length == 5
+    engine.dispose()
+
+
 def common(body="Body"):
     return {
         "author_login": "octocat",

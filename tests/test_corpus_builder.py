@@ -125,4 +125,5 @@ def test_corpus_keeps_full_target_but_sends_denoised_text_to_model():
     assert "fn main()" not in row["clean_text"]
     assert "[CODE_BLOCK_REMOVED: 1 lines]" in row["clean_text"]
     assert row["clean_text"] in row["model_input"]
+    assert row["model_input_chars"] == len(row["model_input"])
     assert row["cleaning_version"] == CLEANING_VERSION == "clean-v2"
