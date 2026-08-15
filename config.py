@@ -61,6 +61,7 @@ class Settings:
     deepseek_user_id: str = "rust-sentiment-labeler"
     llm_concurrency: int = 20
     llm_cache_warmup_requests: int = 2
+    llm_max_consecutive_failures: int = 10
     label_fetch_size: int = 200
     annotation_write_batch_size: int = 50
     log_level: str = "INFO"
@@ -101,6 +102,9 @@ class Settings:
             ),
             llm_cache_warmup_requests=_nonnegative_int(
                 "LLM_CACHE_WARMUP_REQUESTS", 2
+            ),
+            llm_max_consecutive_failures=_positive_int(
+                "LLM_MAX_CONSECUTIVE_FAILURES", 10
             ),
             label_fetch_size=_positive_int("LABEL_FETCH_SIZE", 200),
             annotation_write_batch_size=_positive_int(

@@ -185,6 +185,9 @@ class Pipeline:
                     cache_warmup_requests=self.settings.llm_cache_warmup_requests,
                     fetch_size=self.settings.label_fetch_size,
                     write_batch_size=self.settings.annotation_write_batch_size,
+                    max_consecutive_failures=(
+                        self.settings.llm_max_consecutive_failures
+                    ),
                 ).label_pending_async(limit=limit, sample_set_id=sample_set_id)
             finally:
                 await client.close()

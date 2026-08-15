@@ -21,6 +21,7 @@ from .validation import AnnotationValidationError, validate_annotation
 logger = logging.getLogger(__name__)
 
 RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+FATAL_STATUS_CODES = frozenset({400, 401, 402, 403, 404, 405, 407, 415, 422})
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +47,16 @@ class DeepSeekRequestError(RuntimeError):
         self.retries = retries
         self.rate_limited = rate_limited
         self.server_errors = server_errors
+
+
+class DeepSeekFatalError(DeepSeekRequestError):
+    def __init__(self, message: str, *, status_code: int):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class LabelingCircuitBreakerError(RuntimeError):
+    pass
 
 
 class DeepSeekClient:
@@ -78,6 +89,7 @@ class DeepSeekClient:
         self._sleep = sleep
         self._cooldown_lock = asyncio.Lock()
         self._cooldown_until = 0.0
+        self._fatal_status: int | None = None
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -117,6 +129,11 @@ class DeepSeekClient:
         return 2**attempt + random.random()
 
     async def complete(self, corpus: dict[str, Any]) -> CompletionResult:
+        if self._fatal_status is not None:
+            raise DeepSeekFatalError(
+                f"DeepSeek 全局熔断已触发: HTTP {self._fatal_status}",
+                status_code=self._fatal_status,
+            )
         model_input = json.dumps(
             {"model_input": corpus["model_input"]},
             ensure_ascii=False,
@@ -145,6 +162,13 @@ class DeepSeekClient:
             response: httpx.Response | None = None
             try:
                 response = await self._client.post("/chat/completions", json=payload)
+                if response.status_code in FATAL_STATUS_CODES:
+                    self._fatal_status = response.status_code
+                    raise DeepSeekFatalError(
+                        "DeepSeek 全局配置或鉴权错误，已立即停止全部标注请求: "
+                        f"HTTP {response.status_code}",
+                        status_code=response.status_code,
+                    )
                 if response.status_code in RETRYABLE_STATUS_CODES:
                     raise httpx.HTTPStatusError(
                         "DeepSeek 暂时不可用",
@@ -224,6 +248,7 @@ class DeepSeekLabeler:
         cache_warmup_requests: int = 2,
         fetch_size: int = 200,
         write_batch_size: int = 50,
+        max_consecutive_failures: int = 10,
     ):
         if not 1 <= concurrency <= MAX_LLM_CONCURRENCY:
             raise ValueError(
@@ -235,12 +260,15 @@ class DeepSeekLabeler:
             raise ValueError("标注写入批量必须大于 0")
         if cache_warmup_requests < 0:
             raise ValueError("缓存预热请求数不能小于 0")
+        if max_consecutive_failures <= 0:
+            raise ValueError("连续失败熔断阈值必须大于 0")
         self.client = client
         self.storage = storage
         self.concurrency = concurrency
         self.cache_warmup_requests = cache_warmup_requests
         self.fetch_size = max(fetch_size, concurrency)
         self.write_batch_size = write_batch_size
+        self.max_consecutive_failures = max_consecutive_failures
 
     async def _label_one(
         self,
@@ -277,6 +305,8 @@ class DeepSeekLabeler:
             parsed = validate_annotation(raw_response)
             status = "succeeded"
             error = None
+        except DeepSeekFatalError:
+            raise
         except DeepSeekRequestError as exc:
             metrics.update(
                 retries=exc.retries,
@@ -354,12 +384,23 @@ class DeepSeekLabeler:
 
         semaphore = asyncio.Semaphore(self.concurrency)
         in_flight = {"current": 0, "maximum": 0}
-        warmup_remaining = self.cache_warmup_requests
+        # 即使禁用缓存预热，也必须先串行验证一次鉴权和请求配置，避免错误配置
+        # 在并发启动后放大成大量无效 HTTP 请求。
+        warmup_remaining = max(1, self.cache_warmup_requests)
         write_buffer: list[dict[str, Any]] = []
+        consecutive_failures = 0
+
+        async def flush_write_buffer() -> None:
+            if not write_buffer:
+                return
+            rows_to_write = list(write_buffer)
+            write_buffer.clear()
+            await asyncio.to_thread(self.storage.save_annotations, rows_to_write)
 
         async def record_result(
             result: tuple[dict[str, Any], dict[str, int]],
         ) -> None:
+            nonlocal consecutive_failures
             row, metrics = result
             stats["requests"] += 1
             stats[row["status"]] += 1
@@ -369,35 +410,54 @@ class DeepSeekLabeler:
                 stats["max_in_flight"], in_flight["maximum"]
             )
             write_buffer.append(row)
+            if row["status"] == "succeeded":
+                consecutive_failures = 0
+            else:
+                consecutive_failures += 1
             if len(write_buffer) >= self.write_batch_size:
-                rows_to_write = list(write_buffer)
-                write_buffer.clear()
-                await asyncio.to_thread(self.storage.save_annotations, rows_to_write)
+                await flush_write_buffer()
+            if consecutive_failures >= self.max_consecutive_failures:
+                raise LabelingCircuitBreakerError(
+                    "DeepSeek 标注连续失败达到 "
+                    f"{self.max_consecutive_failures} 条，已熔断并取消剩余请求"
+                )
 
-        for batch in batches:
-            remaining = limit - stats["read"] if limit is not None else len(batch)
-            current_batch = batch[:remaining]
-            if not current_batch:
-                return stats
-            stats["read"] += len(current_batch)
-            warmup_count = min(warmup_remaining, len(current_batch))
-            for corpus in current_batch[:warmup_count]:
-                await record_result(await self._label_one(corpus, semaphore, in_flight))
-            warmup_remaining -= warmup_count
+        active_tasks: list[asyncio.Task[tuple[dict[str, Any], dict[str, int]]]] = []
+        try:
+            for batch in batches:
+                remaining = limit - stats["read"] if limit is not None else len(batch)
+                current_batch = batch[:remaining]
+                if not current_batch:
+                    return stats
+                stats["read"] += len(current_batch)
+                warmup_count = min(warmup_remaining, len(current_batch))
+                for corpus in current_batch[:warmup_count]:
+                    await record_result(
+                        await self._label_one(corpus, semaphore, in_flight)
+                    )
+                warmup_remaining -= warmup_count
 
-            tasks = [
-                asyncio.create_task(self._label_one(corpus, semaphore, in_flight))
-                for corpus in current_batch[warmup_count:]
-            ]
-            for future in asyncio.as_completed(tasks):
-                await record_result(await future)
-            if write_buffer:
-                rows_to_write = list(write_buffer)
-                write_buffer.clear()
-                await asyncio.to_thread(self.storage.save_annotations, rows_to_write)
-            if limit is not None and stats["read"] >= limit:
-                return stats
-        return stats
+                active_tasks = [
+                    asyncio.create_task(
+                        self._label_one(corpus, semaphore, in_flight)
+                    )
+                    for corpus in current_batch[warmup_count:]
+                ]
+                for future in asyncio.as_completed(active_tasks):
+                    await record_result(await future)
+                active_tasks = []
+                await flush_write_buffer()
+                if limit is not None and stats["read"] >= limit:
+                    return stats
+            return stats
+        except (DeepSeekFatalError, LabelingCircuitBreakerError):
+            for task in active_tasks:
+                task.cancel()
+            if active_tasks:
+                await asyncio.gather(*active_tasks, return_exceptions=True)
+            await flush_write_buffer()
+            logger.critical("LLM 标注安全熔断，剩余请求已取消")
+            raise
 
     def label_pending(
         self,

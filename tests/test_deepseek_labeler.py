@@ -4,7 +4,13 @@ import json
 import httpx
 import pytest
 
-from llm_labeler.service import CompletionResult, DeepSeekClient, DeepSeekLabeler
+from llm_labeler.service import (
+    CompletionResult,
+    DeepSeekClient,
+    DeepSeekFatalError,
+    DeepSeekLabeler,
+    LabelingCircuitBreakerError,
+)
 from pipeline import build_parser
 
 
@@ -118,6 +124,33 @@ def test_deepseek_client_retries_rate_limit_and_records_it():
     assert calls == 2
     assert result.retries == 1
     assert result.rate_limited == 1
+
+
+def test_deepseek_client_401_triggers_global_circuit_breaker():
+    calls = 0
+
+    async def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(401, json={"error": "invalid key"})
+
+    async def run():
+        client = DeepSeekClient(
+            "bad-key",
+            "https://api.deepseek.test",
+            "deepseek-v4-flash",
+            transport=httpx.MockTransport(handler),
+        )
+        try:
+            with pytest.raises(DeepSeekFatalError, match="立即停止"):
+                await client.complete({"id": 1, "model_input": "target-1"})
+            with pytest.raises(DeepSeekFatalError, match="熔断"):
+                await client.complete({"id": 2, "model_input": "target-2"})
+        finally:
+            await client.close()
+
+    asyncio.run(run())
+    assert calls == 1
 
 
 def test_deepseek_client_rejects_invalid_user_id():
@@ -245,7 +278,7 @@ def test_invalid_single_response_does_not_fail_other_requests():
         failed=1,
         cache_hit_tokens=300,
         cache_miss_tokens=30,
-        max_in_flight=3,
+        max_in_flight=2,
     )
     rows = {row["corpus_id"]: row for row in storage.saved}
     assert rows[0]["status"] == "succeeded"
@@ -290,11 +323,110 @@ def test_label_pending_stops_at_limit_and_flushes_partial_write_batch():
         succeeded=2,
         cache_hit_tokens=200,
         cache_miss_tokens=20,
-        max_in_flight=2,
+        max_in_flight=1,
     )
     assert storage.requested_fetch_size == 2
     assert sorted(row["corpus_id"] for row in storage.saved) == [0, 1]
     assert storage.write_sizes == [2]
+
+
+def test_labeler_stops_after_first_401_during_safety_preflight():
+    calls = 0
+    storage = FakeAnnotationStorage(count=100)
+
+    async def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(401, json={"error": "invalid key"})
+
+    async def run():
+        client = DeepSeekClient(
+            "bad-key",
+            "https://api.deepseek.test",
+            "deepseek-v4-flash",
+            concurrency=50,
+            transport=httpx.MockTransport(handler),
+        )
+        try:
+            await DeepSeekLabeler(
+                client,
+                storage,
+                concurrency=50,
+                cache_warmup_requests=0,
+            ).label_pending_async()
+        finally:
+            await client.close()
+
+    with pytest.raises(DeepSeekFatalError, match="HTTP 401"):
+        asyncio.run(run())
+    assert calls == 1
+    assert storage.saved == []
+
+
+def test_labeler_cancels_queued_requests_if_auth_expires_after_preflight():
+    calls = 0
+    storage = FakeAnnotationStorage(count=100)
+
+    async def handler(request):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "finish_reason": "stop",
+                            "message": {"content": '{"annotations":[]}'},
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(401, json={"error": "expired key"})
+
+    async def run():
+        client = DeepSeekClient(
+            "expired-key",
+            "https://api.deepseek.test",
+            "deepseek-v4-flash",
+            concurrency=10,
+            transport=httpx.MockTransport(handler),
+        )
+        try:
+            await DeepSeekLabeler(
+                client,
+                storage,
+                concurrency=10,
+                cache_warmup_requests=0,
+                fetch_size=100,
+            ).label_pending_async()
+        finally:
+            await client.close()
+
+    with pytest.raises(DeepSeekFatalError, match="HTTP 401"):
+        asyncio.run(run())
+    assert calls <= 11
+    assert [row["corpus_id"] for row in storage.saved] == [0]
+
+
+def test_labeler_stops_after_consecutive_nonfatal_failures():
+    storage = FakeAnnotationStorage(count=20)
+    client = ValidClient(delay=0.01, invalid_ids=range(20))
+
+    with pytest.raises(LabelingCircuitBreakerError, match="连续失败达到 3 条"):
+        DeepSeekLabeler(
+            client,
+            storage,
+            concurrency=4,
+            cache_warmup_requests=0,
+            fetch_size=20,
+            write_batch_size=50,
+            max_consecutive_failures=3,
+        ).label_pending()
+
+    assert len(client.calls) < 20
+    assert len(storage.saved) == 3
+    assert all(row["status"] == "failed" for row in storage.saved)
 
 
 def test_labeler_passes_sample_set_to_storage():
