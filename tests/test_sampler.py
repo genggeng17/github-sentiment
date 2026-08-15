@@ -75,12 +75,23 @@ def test_sample_is_capped_per_repository_and_is_reusable(storage):
         )
     assert counts == {first: 2, second: 2}
     assert sample_set.status == "completed"
+    assert sample_set.cleaning_version == CLEANING_VERSION
     assert sample_set.max_model_input_chars is None
+
+    with storage.sessions.begin() as session:
+        sample_set = session.scalar(
+            select(CorpusSampleSet).where(CorpusSampleSet.name == "rust-v1")
+        )
+        sample_set.cleaning_version = None
 
     reused = sampler.build("rust-v1", per_repository_limit=2, seed="fixed")
     assert reused["reused"] is True
     with storage.sessions() as session:
         assert set(session.scalars(select(CorpusSampleItem.corpus_id))) == selected_ids
+        sample_set = session.scalar(
+            select(CorpusSampleSet).where(CorpusSampleSet.name == "rust-v1")
+        )
+        assert sample_set.cleaning_version == CLEANING_VERSION
 
 
 def test_sample_name_is_immutable(storage):
@@ -106,6 +117,26 @@ def test_sample_name_is_immutable_when_length_limit_changes(storage):
             per_repository_limit=2,
             seed="fixed",
             max_model_input_chars=8000,
+        )
+
+
+def test_sample_name_is_immutable_when_cleaning_version_changes(storage):
+    seed_repositories(storage)
+    with storage.sessions.begin() as session:
+        oldest_id = session.scalar(select(func.min(Corpus.id)))
+        session.execute(
+            update(Corpus)
+            .where(Corpus.id == oldest_id)
+            .values(cleaning_version="clean-v1")
+        )
+    sampler = CorpusSampler(storage)
+    sampler.build("rust-v1", per_repository_limit=2, seed="fixed")
+    with pytest.raises(ValueError, match="参数不同"):
+        sampler.build(
+            "rust-v1",
+            per_repository_limit=2,
+            seed="fixed",
+            cleaning_version="clean-v1",
         )
 
 
@@ -145,6 +176,20 @@ def test_sample_cli_accepts_model_input_length_limit():
         ]
     )
     assert args.max_model_input_chars == 4000
+
+
+def test_sample_cli_accepts_cleaning_version():
+    args = build_parser().parse_args(
+        ["sample", "--name", "rust-clean-v1", "--cleaning-version", "clean-v1"]
+    )
+    assert args.cleaning_version == "clean-v1"
+
+
+def test_run_cli_accepts_sample_cleaning_version():
+    args = build_parser().parse_args(
+        ["run", "--sample-cleaning-version", "clean-v1"]
+    )
+    assert args.sample_cleaning_version == "clean-v1"
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "not-a-number"])
@@ -201,3 +246,47 @@ def test_new_sample_only_uses_current_cleaning_version(storage):
     )
     assert stats["eligible"] == 7
     assert stats["selected"] == 7
+
+
+def test_sample_can_select_an_existing_cleaning_version(storage):
+    seed_repositories(storage)
+    with storage.sessions.begin() as session:
+        oldest_id = session.scalar(select(func.min(Corpus.id)))
+        session.execute(
+            update(Corpus)
+            .where(Corpus.id == oldest_id)
+            .values(cleaning_version="clean-v1")
+        )
+
+    stats = CorpusSampler(storage).build(
+        "rust-clean-v1",
+        per_repository_limit=100,
+        seed="fixed",
+        cleaning_version="clean-v1",
+    )
+
+    assert stats["cleaning_version"] == "clean-v1"
+    assert stats["eligible"] == 1
+    assert stats["selected"] == 1
+    with storage.sessions() as session:
+        selected_versions = set(
+            session.scalars(
+                select(Corpus.cleaning_version)
+                .join(CorpusSampleItem, CorpusSampleItem.corpus_id == Corpus.id)
+                .join(
+                    CorpusSampleSet,
+                    CorpusSampleSet.id == CorpusSampleItem.sample_set_id,
+                )
+                .where(CorpusSampleSet.name == "rust-clean-v1")
+            )
+        )
+    assert selected_versions == {"clean-v1"}
+
+
+def test_sample_rejects_unknown_cleaning_version(storage):
+    seed_repositories(storage)
+    with pytest.raises(ValueError, match="可用版本"):
+        CorpusSampler(storage).build(
+            "rust-unknown",
+            cleaning_version="clean-v999",
+        )

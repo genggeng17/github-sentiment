@@ -26,13 +26,14 @@ class CorpusSampler:
         repository_id: int,
         limit: int,
         seed: str,
+        cleaning_version: str,
         max_model_input_chars: int | None,
     ) -> tuple[int, list[dict[str, Any]]]:
         eligible = 0
         selected: list[tuple[int, int, dict[str, Any]]] = []
         for batch in self.storage.iter_sample_candidates(
             repository_id,
-            cleaning_version=CLEANING_VERSION,
+            cleaning_version=cleaning_version,
             max_model_input_chars=max_model_input_chars,
         ):
             for row in batch:
@@ -58,29 +59,35 @@ class CorpusSampler:
         *,
         per_repository_limit: int = 5000,
         seed: str = "0",
+        cleaning_version: str = CLEANING_VERSION,
         max_model_input_chars: int | None = None,
     ) -> dict[str, Any]:
         name = name.strip()
         seed = str(seed)
+        cleaning_version = cleaning_version.strip()
         if not name:
             raise ValueError("采样集名称不能为空")
+        if not cleaning_version:
+            raise ValueError("清洗版本不能为空")
         if per_repository_limit <= 0:
             raise ValueError("每仓库采样上限必须大于 0")
         if max_model_input_chars is not None and max_model_input_chars <= 0:
             raise ValueError("候选语料字符长度上限必须大于 0")
+        available_versions = self.storage.available_cleaning_versions()
+        if cleaning_version not in available_versions:
+            available = ", ".join(available_versions) or "（无）"
+            raise ValueError(
+                f"数据库中不存在清洗版本 {cleaning_version!r}；可用版本: {available}"
+            )
 
         sample_set_id, completed_stats = self.storage.prepare_sample_set(
             name,
             per_repository_limit,
             seed,
+            cleaning_version,
             max_model_input_chars,
         )
         if completed_stats is not None:
-            if completed_stats.get("cleaning_version") != CLEANING_VERSION:
-                raise ValueError(
-                    f"采样集 {name!r} 使用的清洗版本不是 {CLEANING_VERSION}；"
-                    "请使用新的采样集名称"
-                )
             return {
                 **completed_stats,
                 "sample_set_id": sample_set_id,
@@ -93,7 +100,7 @@ class CorpusSampler:
             "per_repository_limit": per_repository_limit,
             "seed": seed,
             "max_model_input_chars": max_model_input_chars,
-            "cleaning_version": CLEANING_VERSION,
+            "cleaning_version": cleaning_version,
             "repositories": {},
             "eligible": 0,
             "selected": 0,
@@ -107,6 +114,7 @@ class CorpusSampler:
                     repository_id,
                     per_repository_limit,
                     seed,
+                    cleaning_version,
                     max_model_input_chars,
                 )
                 rows = [

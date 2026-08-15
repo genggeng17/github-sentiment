@@ -29,7 +29,7 @@ def storage():
     engine.dispose()
 
 
-def test_create_schema_adds_sample_length_limit_to_existing_database():
+def test_create_schema_adds_sample_metadata_to_existing_database():
     engine = create_engine("sqlite+pysqlite:///:memory:")
     with engine.begin() as connection:
         connection.execute(
@@ -41,6 +41,7 @@ def test_create_schema_adds_sample_length_limit_to_existing_database():
     columns = {
         column["name"] for column in inspect(engine).get_columns("corpus_sample_sets")
     }
+    assert "cleaning_version" in columns
     assert "max_model_input_chars" in columns
     engine.dispose()
 

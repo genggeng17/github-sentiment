@@ -186,6 +186,7 @@ class CorpusSampleSet(Base):
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     per_repository_limit: Mapped[int] = mapped_column(Integer, nullable=False)
     seed: Mapped[str] = mapped_column(String(100), nullable=False)
+    cleaning_version: Mapped[str | None] = mapped_column(String(30))
     max_model_input_chars: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="building")
     stats: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)

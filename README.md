@@ -18,7 +18,7 @@ GitHub 数据采集 → 文本清洗与去重 → DeepSeek 标注 → 人工抽�
 | --- | --- | --- | --- |
 | GitHub 采集 | `GITHUB_API_VERSION` | `2022-11-28` | 固定 GitHub REST API 契约；不参与语料或标注唯一键 |
 | 语料构建 | `CLEANING_VERSION` / `corpus.cleaning_version` | `clean-v2` | 标识清洗和模型输入构造规则，并参与 `content_hash` 计算 |
-| 采样 | `corpus_sample_sets.name` | 运行时指定，如 `rust-v1` | 标识不可变采样集；还需结合每仓库上限、`seed` 和候选语料字符上限追溯 |
+| 采样 | `corpus_sample_sets.name` | 运行时指定，如 `rust-v1` | 标识不可变采样集；还需结合清洗版本、每仓库上限、`seed` 和候选语料字符上限追溯 |
 | 标签体系 | `TAXONOMY_VERSION` / `llm_annotations.taxonomy_version` | `rust-aspects-v2` | 标识允许输出的方面及其定义 |
 | Prompt | `PROMPT_VERSION` / `llm_annotations.prompt_version` | `aspect-sentiment-zh-v7` | 标识提示词、输入输出协议和标注规则 |
 | LLM | `DEEPSEEK_MODEL` / `llm_annotations.model_name` | `deepseek-v4-flash` | 标识实际调用的模型；可由 `.env` 覆盖 |
@@ -40,8 +40,9 @@ GitHub 数据采集 → 文本清洗与去重 → DeepSeek 标注 → 人工抽�
 `GITHUB_API_VERSION=2022-11-28` 自项目建立后尚未变更。现有 Git 记录中没有
 `aspect-sentiment-v2`；版本号以数据库实际保存值为准，不应推测或补写缺失版本。升级
 清洗规则、标签体系、Prompt 或模型时必须使用新版本值，保留旧记录用于复现，不要原地
-覆盖已有版本的含义。新采样只从当前 `CLEANING_VERSION` 选择语料，清洗版本变化后必须
-使用新的采样集名称。
+覆盖已有版本的含义。新采样默认从当前 `CLEANING_VERSION` 选择语料，也可通过
+`--cleaning-version` 选择数据库中已经生成的其他版本；不同清洗版本必须使用不同的
+采样集名称。
 
 ## 仓库白名单
 

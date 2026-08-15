@@ -9,7 +9,7 @@ from collections.abc import Callable
 from typing import Any
 
 from config import MAX_LLM_CONCURRENCY, Settings, normalize_repository_name
-from corpus_builder import CorpusBuilder
+from corpus_builder import CLEANING_VERSION, CorpusBuilder
 from crawler import CollectionLimits, GitHubClient, GitHubCollector
 from llm_labeler.service import DeepSeekClient, DeepSeekLabeler
 from sampler import CorpusSampler
@@ -141,12 +141,14 @@ class Pipeline:
         *,
         per_repository_limit: int = 5000,
         seed: str = "0",
+        cleaning_version: str = CLEANING_VERSION,
         max_model_input_chars: int | None = None,
     ) -> dict[str, Any]:
         return CorpusSampler(self.storage).build(
             name,
             per_repository_limit=per_repository_limit,
             seed=seed,
+            cleaning_version=cleaning_version,
             max_model_input_chars=max_model_input_chars,
         )
 
@@ -198,6 +200,7 @@ class Pipeline:
         sample_name: str | None = None,
         sample_per_repository: int = 5000,
         sample_seed: str = "0",
+        sample_cleaning_version: str = CLEANING_VERSION,
         sample_max_model_input_chars: int | None = None,
         label_concurrency: int | None = None,
     ) -> dict[str, Any]:
@@ -216,6 +219,7 @@ class Pipeline:
                 sample_name,
                 per_repository_limit=sample_per_repository,
                 seed=sample_seed,
+                cleaning_version=sample_cleaning_version,
                 max_model_input_chars=sample_max_model_input_chars,
             )
         if not skip_label:
@@ -278,6 +282,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="确定性抽样种子；相同候选集和种子会产生相同结果",
     )
     sample.add_argument(
+        "--cleaning-version",
+        default=CLEANING_VERSION,
+        help=f"从指定清洗版本选择 corpus（默认 {CLEANING_VERSION}）",
+    )
+    sample.add_argument(
         "--max-model-input-chars",
         type=positive_int,
         default=None,
@@ -319,6 +328,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="每仓库采样上限（默认 5000）",
     )
     run.add_argument("--sample-seed", default="0", help="确定性抽样种子")
+    run.add_argument(
+        "--sample-cleaning-version",
+        default=CLEANING_VERSION,
+        help=f"采样阶段选择的 corpus 清洗版本（默认 {CLEANING_VERSION}）",
+    )
     run.add_argument(
         "--sample-max-model-input-chars",
         type=positive_int,
@@ -390,6 +404,7 @@ def main(argv: list[str] | None = None) -> int:
             args.name,
             per_repository_limit=args.per_repository,
             seed=args.seed,
+            cleaning_version=args.cleaning_version,
             max_model_input_chars=args.max_model_input_chars,
         ),
         "label": lambda _run_id: pipeline.label(
@@ -404,6 +419,7 @@ def main(argv: list[str] | None = None) -> int:
             sample_name=args.sample_name,
             sample_per_repository=args.sample_per_repository,
             sample_seed=args.sample_seed,
+            sample_cleaning_version=args.sample_cleaning_version,
             sample_max_model_input_chars=args.sample_max_model_input_chars,
             label_concurrency=args.label_concurrency,
         ),

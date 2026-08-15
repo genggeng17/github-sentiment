@@ -51,6 +51,14 @@ class Storage:
         if "corpus_sample_sets" not in inspector.get_table_names():
             return
         columns = {column["name"] for column in inspector.get_columns("corpus_sample_sets")}
+        if "cleaning_version" not in columns:
+            with self.engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE corpus_sample_sets "
+                        "ADD COLUMN cleaning_version VARCHAR(30) NULL"
+                    )
+                )
         if "max_model_input_chars" not in columns:
             with self.engine.begin() as connection:
                 connection.execute(
@@ -721,11 +729,21 @@ class Storage:
                     yield batch
                     last_id = batch[-1]["id"]
 
+    def available_cleaning_versions(self) -> tuple[str, ...]:
+        with self.sessions() as session:
+            versions = session.scalars(
+                select(Corpus.cleaning_version)
+                .distinct()
+                .order_by(Corpus.cleaning_version)
+            ).all()
+        return tuple(versions)
+
     def prepare_sample_set(
         self,
         name: str,
         per_repository_limit: int,
         seed: str,
+        cleaning_version: str,
         max_model_input_chars: int | None,
     ) -> tuple[int, dict[str, Any] | None]:
         with self.sessions.begin() as session:
@@ -733,14 +751,22 @@ class Storage:
                 select(CorpusSampleSet).where(CorpusSampleSet.name == name)
             )
             if existing is not None:
+                existing_cleaning_version = existing.cleaning_version or (
+                    existing.stats or {}
+                ).get("cleaning_version")
                 if (
                     existing.per_repository_limit != per_repository_limit
                     or existing.seed != seed
+                    or (
+                        existing_cleaning_version is not None
+                        and existing_cleaning_version != cleaning_version
+                    )
                     or existing.max_model_input_chars != max_model_input_chars
                 ):
                     raise ValueError(
                         f"采样集 {name!r} 已存在但参数不同；请使用新的采样集名称"
                     )
+                existing.cleaning_version = cleaning_version
                 if existing.status == "completed":
                     return existing.id, dict(existing.stats)
                 session.execute(
@@ -756,6 +782,7 @@ class Storage:
                 name=name,
                 per_repository_limit=per_repository_limit,
                 seed=seed,
+                cleaning_version=cleaning_version,
                 max_model_input_chars=max_model_input_chars,
                 status="building",
                 stats={},
