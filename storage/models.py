@@ -228,6 +228,26 @@ class CorpusSampleItem(Base):
     selected_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
 
+class LexiconSampleHit(Base):
+    """Selected corpus evidence; candidate aspects are not annotation labels."""
+
+    __tablename__ = "lexicon_sample_hits"
+    __table_args__ = (
+        Index("ix_lexicon_set_aspect", "sample_set_id", "candidate_aspect"),
+    )
+
+    sample_set_id: Mapped[int] = mapped_column(
+        ForeignKey("corpus_sample_sets.id"), primary_key=True
+    )
+    corpus_id: Mapped[int] = mapped_column(ForeignKey("corpus.id"), primary_key=True)
+    candidate_aspect: Mapped[str] = mapped_column(String(40), primary_key=True)
+    selected_for_quota: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    input_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    field_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+
+
 class LlmAnnotation(Base):
     __tablename__ = "llm_annotations"
     __table_args__ = (

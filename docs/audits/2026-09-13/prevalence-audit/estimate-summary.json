@@ -1,0 +1,54 @@
+{
+  "aspect_core": {
+    "empty_count": 68,
+    "empty_n": 200,
+    "nonempty_count": 50,
+    "nonempty_n": 50,
+    "weighted_estimate": 0.3747559683350994,
+    "approx_simultaneous_95_interval": [
+      0.30331578559303835,
+      0.4488163711154413
+    ]
+  },
+  "polar_core": {
+    "empty_count": 37,
+    "empty_n": 200,
+    "nonempty_count": 45,
+    "nonempty_n": 50,
+    "weighted_estimate": 0.22265229902969105,
+    "approx_simultaneous_95_interval": [
+      0.16485020898542402,
+      0.2912324205894136
+    ]
+  },
+  "aspect_broad": {
+    "empty_count": 107,
+    "empty_n": 200,
+    "nonempty_count": 50,
+    "nonempty_n": 50,
+    "weighted_estimate": 0.5594871595088201,
+    "approx_simultaneous_95_interval": [
+      0.47989705217141854,
+      0.6326442151222456
+    ]
+  },
+  "polar_broad": {
+    "empty_count": 63,
+    "empty_n": 200,
+    "nonempty_count": 48,
+    "nonempty_n": 50,
+    "weighted_estimate": 0.3489660599638471,
+    "approx_simultaneous_95_interval": [
+      0.27820732968440126,
+      0.42389033458934877
+    ]
+  },
+  "scope": "v7 succeeded 96,258 records, repository-capped clean-v1 max4,000-char sample; not entire GitHub or source corpus",
+  "limitations": [
+    "Assistant semantic reassessment, not independent human gold labels.",
+    "Input display hid v7 labels, but some texts had appeared in the previous audit.",
+    "Intervals only describe sampling variation conditional on this reviewers definitions; exclude systematic judgment, taxonomy and model errors.",
+    "Broad results count all boundary candidates and are sensitivity extremes, not primary estimates.",
+    "No additional DeepSeek calls, no remote or production changes."
+  ]
+}

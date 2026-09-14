@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "version": "rust-targeted-v1",
+  "description": "四方面候选检索初版；all 内表达式须在 TARGET 同一自然语言段落出现。命中不是标签。filters 可按方面覆盖命令行公共筛选条件。",
+  "aspects": {
+    "libraries_frameworks": {
+      "filters": {},
+      "rules": [
+        {"id": "libraries.quality", "all": ["\\b(?:librar(?:y|ies)|crates?|frameworks?|ecosystem)\\b", "\\b(?:matur\\w*|maintain\\w*|unmaintained|abandon\\w*|stabl\\w*|stability|reliab\\w*|unreliab\\w*|production.ready|compatib\\w*|incompatib\\w*)\\b"]},
+        {"id": "libraries.coverage", "all": ["\\b(?:librar(?:y|ies)|crates?|frameworks?|ecosystem)\\b", "\\b(?:lack\\w*|missing|alternatives?|available|availability|support(?:s|ed)?|cross.platform)\\b"]},
+        {"id": "libraries.adoption", "all": ["\\b(?:librar(?:y|ies)|crates?|frameworks?)\\b", "\\b(?:recommend\\w*|adopt\\w*|migrat\\w*|unusable|keeps? crashing|breaks? compatibility)\\b"]},
+        {"id": "libraries.zh", "all": ["第三方库|框架|生态|依赖库", "成熟|稳定|维护|兼容|缺少|支持|可用|推荐"]}
+      ]
+    },
+    "learning_curve": {
+      "filters": {},
+      "rules": [
+        {"id": "learning.rust", "all": ["\\b(?:rust|ownership|borrowing|borrow checker|lifetimes?|traits?)\\b", "\\b(?:learn\\w*|understand\\w*|confus\\w*|beginners?|newcomers?|newbies|intuit\\w*|unintuit\\w*)\\b"]},
+        {"id": "learning.cost", "all": ["\\b(?:rust|ownership|borrowing|lifetimes?|type system)\\b", "\\b(?:learning curve|mental model|cognitive load|getting started|hard to grasp|difficult to grasp|took me .* to)\\b"]},
+        {"id": "learning.zh", "all": ["[Rr]ust|所有权|借用|生命周期|类型系统", "学习|理解|入门|初学|心智|认知|难懂|困惑"]}
+      ]
+    },
+    "package_manager": {
+      "filters": {},
+      "rules": [
+        {"id": "package.cargo", "all": ["\\bcargo\\b", "\\b(?:dependenc\\w*|resolver?|versions?|lockfiles?|workspace|features?|registr(?:y|ies)|publish\\w*|download\\w*)\\b"]},
+        {"id": "package.features", "all": ["\\b(?:default.features|feature unification|feature flags?|optional dependenc\\w*|dependency resolution|dependency conflicts?|version conflicts?|semver|lockfile|Cargo\\.lock|Cargo\\.toml|crates\\.io)\\b"]},
+        {"id": "package.workspace", "all": ["\\bworkspace\\b", "\\b(?:members?|dependenc\\w*|inherit\\w*|resolver?|features?)\\b"]},
+        {"id": "package.zh", "all": ["依赖解析|版本冲突|默认特性|包管理|锁文件|依赖管理|依赖版本"]}
+      ]
+    },
+    "type_system": {
+      "filters": {},
+      "rules": [
+        {"id": "types.mechanisms", "all": ["\\b(?:type inference|type system|type safety|type checking|type constraints?|type annotations?|type parameters?|associated types?|higher.ranked|variadic generics|const generics|generic associated types|static dispatch|dynamic dispatch|trait objects?|trait bounds?|impl trait)\\b"]},
+        {"id": "types.generics", "all": ["\\b(?:generics?|traits?)\\b", "\\b(?:express\\w*|infer\\w*|bounds?|constraints?|specializ\\w*|coherence|implement\\w*|monomorph\\w*|limitation\\w*)\\b"]},
+        {"id": "types.zh", "all": ["类型推导|类型系统|关联类型|泛型|类型约束|特征约束|动态分派|静态分派"]}
+      ]
+    }
+  }
+}

@@ -30,6 +30,7 @@ from .models import (
     CorpusSampleSet,
     Issue,
     IssueComment,
+    LexiconSampleHit,
     LlmAnnotation,
     PipelineRun,
     PullRequest,
@@ -737,6 +738,8 @@ class Storage:
         cleaning_version: str | None = None,
         max_model_input_chars: int | None = None,
         batch_size: int = 5000,
+        include_text: bool = False,
+        max_corpus_id: int | None = None,
     ) -> Iterator[list[dict[str, Any]]]:
         repository_ids = tuple(repository_ids)
         if not repository_ids:
@@ -801,6 +804,12 @@ class Storage:
             ),
         ]
         candidate_filters = [Corpus.duplicate_of_id.is_(None)]
+        if include_text:
+            queries = [
+                query.add_columns(Corpus.clean_text, Corpus.model_input) for query in queries
+            ]
+        if max_corpus_id is not None:
+            candidate_filters.append(Corpus.id <= max_corpus_id)
         if cleaning_version is not None:
             candidate_filters.append(Corpus.cleaning_version == cleaning_version)
         if max_model_input_chars is not None:
@@ -833,6 +842,7 @@ class Storage:
         seed: str,
         cleaning_version: str,
         max_model_input_chars: int | None,
+        selection_config: dict[str, Any] | None = None,
     ) -> tuple[int, dict[str, Any] | None]:
         with self.sessions.begin() as session:
             existing = session.scalar(
@@ -850,6 +860,7 @@ class Storage:
                         and existing_cleaning_version != cleaning_version
                     )
                     or existing.max_model_input_chars != max_model_input_chars
+                    or (existing.stats or {}).get("selection_config") != selection_config
                 ):
                     raise ValueError(
                         f"采样集 {name!r} 已存在但参数不同；请使用新的采样集名称"
@@ -857,13 +868,21 @@ class Storage:
                 existing.cleaning_version = cleaning_version
                 if existing.status == "completed":
                     return existing.id, dict(existing.stats)
+                if existing.status == "building" and selection_config is not None:
+                    raise ValueError(f"采样集 {name!r} 正在构建；请等待完成或处理失败状态")
+                if selection_config is not None:
+                    session.execute(
+                        delete(LexiconSampleHit).where(
+                            LexiconSampleHit.sample_set_id == existing.id
+                        )
+                    )
                 session.execute(
                     delete(CorpusSampleItem).where(
                         CorpusSampleItem.sample_set_id == existing.id
                     )
                 )
                 existing.status = "building"
-                existing.stats = {}
+                existing.stats = {"selection_config": selection_config} if selection_config else {}
                 existing.updated_at = utcnow()
                 return existing.id, None
             sample_set = CorpusSampleSet(
@@ -873,7 +892,7 @@ class Storage:
                 cleaning_version=cleaning_version,
                 max_model_input_chars=max_model_input_chars,
                 status="building",
-                stats={},
+                stats={"selection_config": selection_config} if selection_config else {},
             )
             session.add(sample_set)
             session.flush()
@@ -889,6 +908,17 @@ class Storage:
                 session.execute(CorpusSampleItem.__table__.insert(), batch)
             written += len(batch)
         return written
+
+    def corpus_high_watermark(self) -> int:
+        with self.sessions() as session:
+            return session.scalar(select(func.max(Corpus.id))) or 0
+
+    def insert_lexicon_hits(self, rows: list[dict[str, Any]], batch_size: int = 2000) -> None:
+        for offset in range(0, len(rows), batch_size):
+            with self.sessions.begin() as session:
+                session.execute(
+                    LexiconSampleHit.__table__.insert(), rows[offset:offset + batch_size]
+                )
 
     def finish_sample_set(
         self,

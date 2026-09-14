@@ -11,6 +11,7 @@ from typing import Any
 from config import MAX_LLM_CONCURRENCY, Settings, normalize_repository_name
 from corpus_builder import CLEANING_VERSION, CorpusBuilder
 from crawler import CollectionLimits, GitHubClient, GitHubCollector
+from lexicon_sampling import LexiconSampler, parse_quotas
 from llm_labeler.service import DeepSeekClient, DeepSeekLabeler
 from sampler import CorpusSampler
 from storage import Storage
@@ -295,6 +296,23 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="候选语料 model_input 字符数上限（默认不限制）",
     )
+    lexicon = subparsers.add_parser("sample-lexicon", help="按方面配额建立独立词典集")
+    lexicon.add_argument("--name", required=True, help="独立集合名；同名不可更改参数")
+    lexicon.add_argument("--lexicon", required=True, help="UTF-8 JSON 词典路径")
+    lexicon.add_argument("--quota", action="append", required=True, help="aspect=条数，可重复")
+    lexicon.add_argument("--cleaning-version", required=True, help="固定语料清洗版本")
+    lexicon.add_argument("--seed", default="0")
+    lexicon.add_argument("--min-target-chars", type=positive_int, default=1)
+    lexicon.add_argument("--max-model-input-chars", type=positive_int, default=4000)
+    lexicon.add_argument(
+        "--per-repository", type=positive_int, default=None,
+        help="每方面在每仓库的候选上限，默认不限制",
+    )
+    lexicon.add_argument(
+        "--source-type", action="append", default=None,
+        choices=["issue", "pull_request", "issue_comment", "pr_issue_comment", "pr_review_comment"],
+    )
+    lexicon.add_argument("--repository", action="append", default=None, help="owner/repo，可重复")
     label = subparsers.add_parser("label", help="标注尚未成功标注的语料")
     label.add_argument(
         "--limit",
@@ -414,6 +432,14 @@ def main(argv: list[str] | None = None) -> int:
             limit=args.limit,
             sample_name=args.sample,
             concurrency=args.concurrency,
+        ),
+        "sample-lexicon": lambda _run_id: LexiconSampler(storage).build(
+            args.name, lexicon_path=args.lexicon, quotas=parse_quotas(args.quota),
+            cleaning_version=args.cleaning_version, seed=args.seed,
+            min_target_chars=args.min_target_chars,
+            max_model_input_chars=args.max_model_input_chars,
+            per_repository_limit=args.per_repository,
+            source_types=args.source_type, repository_names=args.repository,
         ),
         "run": lambda run_id: pipeline.run_all(
             run_id,

@@ -1,0 +1,12 @@
+{
+  "scope": "本地已有随机1500条，词典匹配冒烟检查，不是有效标签率评估",
+  "unique_candidates": 130,
+  "candidate_counts": {
+    "libraries_frameworks": 30,
+    "learning_curve": 21,
+    "package_manager": 67,
+    "type_system": 29
+  },
+  "prompt_version": "aspect-sentiment-zh-v8",
+  "valid_examples": 19
+}

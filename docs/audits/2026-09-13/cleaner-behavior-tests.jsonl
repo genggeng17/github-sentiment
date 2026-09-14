@@ -1,0 +1,5 @@
+{"name": "代码框中的自然语言", "input": "The result is:\n```text\nThe new API is much harder to use.\n```", "actual_output": "The result is:\n[CODE_BLOCK_REMOVED: 1 lines]"}
+{"name": "堆栈后没有空行的体验描述", "input": "stack backtrace:\n   0: fail\nThis crashes every day and blocks my work.\n", "actual_output": "[STACK_TRACE_REMOVED: 3 lines]"}
+{"name": "短诊断", "input": "The compiler suggests:\n```\nhelp: add an explicit lifetime\n```", "actual_output": "The compiler suggests:\n[CODE_BLOCK_REMOVED: 1 lines]"}
+{"name": "基准对比", "input": "Benchmark results:\n```text\nbefore: 20 ms\nafter: 400 ms\n```", "actual_output": "Benchmark results:\n[CODE_BLOCK_REMOVED: 2 lines]"}
+{"name": "误匹配技术日志的连续自然语言", "input": "Cargo is much slower now.\nRunning this blocks the editor.\nChecking the project takes ten minutes.", "actual_output": "[TECHNICAL_OUTPUT_REMOVED: 3 lines]"}

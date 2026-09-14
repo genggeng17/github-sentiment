@@ -1,0 +1,424 @@
+{
+  "date": "2026-09-13",
+  "v4": {
+    "n": 4972,
+    "nonempty": 1413,
+    "rate": 0.2841914722445696,
+    "polar": 973,
+    "neutral_only": 440,
+    "aspects": {
+      "package_manager": 144,
+      "compile_time": 44,
+      "tooling_documentation": 269,
+      "type_system": 124,
+      "runtime_performance": 115,
+      "libraries_frameworks": 186,
+      "ownership": 52,
+      "diagnostics_debugging": 89,
+      "readability_maintainability": 90,
+      "safety": 101,
+      "api_extensibility": 272,
+      "community": 10,
+      "learning_curve": 8
+    },
+    "classes": {
+      "negative": 738,
+      "neutral": 469,
+      "positive": 297
+    }
+  },
+  "v7": {
+    "n": 96258,
+    "nonempty": 5069,
+    "rate": 0.05266055808348397,
+    "polar": 4462,
+    "neutral_only": 607,
+    "aspects": {
+      "diagnostics_debugging": 588,
+      "package_manager": 115,
+      "tooling_documentation": 720,
+      "compile_time": 236,
+      "learning_curve": 52,
+      "libraries_frameworks": 83,
+      "safety": 373,
+      "readability_maintainability": 270,
+      "api_extensibility": 2220,
+      "type_system": 180,
+      "runtime_performance": 676,
+      "community": 37,
+      "ownership": 283
+    },
+    "classes": {
+      "negative": 3254,
+      "positive": 1750,
+      "neutral": 829
+    }
+  },
+  "overlap_v4": {
+    "n": 1158,
+    "nonempty": 364,
+    "rate": 0.3143350604490501,
+    "polar": 259,
+    "neutral_only": 105,
+    "aspects": {
+      "libraries_frameworks": 49,
+      "ownership": 13,
+      "tooling_documentation": 81,
+      "package_manager": 40,
+      "community": 3,
+      "runtime_performance": 25,
+      "compile_time": 10,
+      "safety": 24,
+      "api_extensibility": 74,
+      "type_system": 31,
+      "diagnostics_debugging": 20,
+      "learning_curve": 2,
+      "readability_maintainability": 14
+    },
+    "classes": {
+      "negative": 203,
+      "neutral": 111,
+      "positive": 72
+    }
+  },
+  "overlap_v7": {
+    "n": 1158,
+    "nonempty": 78,
+    "rate": 0.06735751295336788,
+    "polar": 66,
+    "neutral_only": 12,
+    "aspects": {
+      "api_extensibility": 38,
+      "runtime_performance": 15,
+      "ownership": 5,
+      "safety": 5,
+      "package_manager": 2,
+      "tooling_documentation": 8,
+      "type_system": 5,
+      "diagnostics_debugging": 4,
+      "readability_maintainability": 2,
+      "compile_time": 2,
+      "libraries_frameworks": 1,
+      "learning_curve": 1
+    },
+    "classes": {
+      "negative": 58,
+      "positive": 17,
+      "neutral": 13
+    }
+  },
+  "transitions": {
+    "nonempty->empty": 296,
+    "nonempty->nonempty": 68,
+    "empty->empty": 784,
+    "empty->nonempty": 10
+  },
+  "historical_input_matches": 1158,
+  "by_source": {
+    "issue": {
+      "v4": {
+        "n": 743,
+        "nonempty": 466,
+        "rate": 0.6271870794078062,
+        "polar": 391,
+        "neutral_only": 75,
+        "aspects": {
+          "package_manager": 48,
+          "compile_time": 14,
+          "tooling_documentation": 79,
+          "type_system": 27,
+          "runtime_performance": 30,
+          "libraries_frameworks": 125,
+          "ownership": 8,
+          "diagnostics_debugging": 30,
+          "safety": 29,
+          "api_extensibility": 88,
+          "learning_curve": 2,
+          "readability_maintainability": 10
+        },
+        "classes": {
+          "negative": 394,
+          "neutral": 79,
+          "positive": 17
+        }
+      },
+      "v7": {
+        "n": 13511,
+        "nonempty": 1580,
+        "rate": 0.11694175116571683,
+        "polar": 1496,
+        "neutral_only": 84,
+        "aspects": {
+          "diagnostics_debugging": 259,
+          "package_manager": 40,
+          "tooling_documentation": 353,
+          "compile_time": 47,
+          "learning_curve": 13,
+          "libraries_frameworks": 14,
+          "safety": 86,
+          "readability_maintainability": 46,
+          "api_extensibility": 675,
+          "type_system": 30,
+          "runtime_performance": 158,
+          "ownership": 42,
+          "community": 1
+        },
+        "classes": {
+          "negative": 1300,
+          "positive": 354,
+          "neutral": 110
+        }
+      }
+    },
+    "issue_comment": {
+      "v4": {
+        "n": 1831,
+        "nonempty": 371,
+        "rate": 0.2026215182960131,
+        "polar": 252,
+        "neutral_only": 119,
+        "aspects": {
+          "package_manager": 37,
+          "diagnostics_debugging": 21,
+          "tooling_documentation": 76,
+          "compile_time": 12,
+          "runtime_performance": 35,
+          "type_system": 41,
+          "libraries_frameworks": 29,
+          "api_extensibility": 82,
+          "readability_maintainability": 6,
+          "safety": 29,
+          "community": 6,
+          "ownership": 18,
+          "learning_curve": 4
+        },
+        "classes": {
+          "neutral": 131,
+          "negative": 173,
+          "positive": 92
+        }
+      },
+      "v7": {
+        "n": 36556,
+        "nonempty": 1778,
+        "rate": 0.04863770653244338,
+        "polar": 1505,
+        "neutral_only": 273,
+        "aspects": {
+          "api_extensibility": 772,
+          "safety": 157,
+          "community": 26,
+          "package_manager": 51,
+          "compile_time": 99,
+          "tooling_documentation": 244,
+          "runtime_performance": 236,
+          "diagnostics_debugging": 180,
+          "learning_curve": 29,
+          "libraries_frameworks": 51,
+          "type_system": 80,
+          "ownership": 126,
+          "readability_maintainability": 56
+        },
+        "classes": {
+          "positive": 533,
+          "negative": 1190,
+          "neutral": 384
+        }
+      }
+    },
+    "pr_issue_comment": {
+      "v4": {
+        "n": 871,
+        "nonempty": 140,
+        "rate": 0.16073478760045926,
+        "polar": 89,
+        "neutral_only": 51,
+        "aspects": {
+          "package_manager": 21,
+          "compile_time": 7,
+          "tooling_documentation": 22,
+          "api_extensibility": 23,
+          "runtime_performance": 17,
+          "type_system": 17,
+          "diagnostics_debugging": 9,
+          "community": 3,
+          "safety": 7,
+          "readability_maintainability": 15,
+          "libraries_frameworks": 6,
+          "ownership": 6,
+          "learning_curve": 1
+        },
+        "classes": {
+          "negative": 60,
+          "neutral": 57,
+          "positive": 37
+        }
+      },
+      "v7": {
+        "n": 17676,
+        "nonempty": 600,
+        "rate": 0.03394433129667346,
+        "polar": 494,
+        "neutral_only": 106,
+        "aspects": {
+          "api_extensibility": 318,
+          "diagnostics_debugging": 34,
+          "readability_maintainability": 37,
+          "runtime_performance": 101,
+          "tooling_documentation": 40,
+          "type_system": 24,
+          "safety": 47,
+          "community": 9,
+          "compile_time": 37,
+          "libraries_frameworks": 11,
+          "package_manager": 16,
+          "ownership": 32,
+          "learning_curve": 4
+        },
+        "classes": {
+          "negative": 332,
+          "positive": 229,
+          "neutral": 149
+        }
+      }
+    },
+    "pr_review_comment": {
+      "v4": {
+        "n": 742,
+        "nonempty": 204,
+        "rate": 0.2749326145552561,
+        "polar": 107,
+        "neutral_only": 97,
+        "aspects": {
+          "readability_maintainability": 42,
+          "tooling_documentation": 29,
+          "type_system": 26,
+          "runtime_performance": 16,
+          "api_extensibility": 46,
+          "libraries_frameworks": 5,
+          "diagnostics_debugging": 7,
+          "package_manager": 10,
+          "ownership": 15,
+          "safety": 17
+        },
+        "classes": {
+          "positive": 43,
+          "negative": 68,
+          "neutral": 102
+        }
+      },
+      "v7": {
+        "n": 14759,
+        "nonempty": 556,
+        "rate": 0.03767192899247917,
+        "polar": 431,
+        "neutral_only": 125,
+        "aspects": {
+          "diagnostics_debugging": 40,
+          "runtime_performance": 51,
+          "readability_maintainability": 79,
+          "api_extensibility": 237,
+          "tooling_documentation": 39,
+          "ownership": 59,
+          "safety": 45,
+          "compile_time": 14,
+          "type_system": 32,
+          "learning_curve": 2,
+          "libraries_frameworks": 1,
+          "package_manager": 3
+        },
+        "classes": {
+          "negative": 296,
+          "neutral": 140,
+          "positive": 166
+        }
+      }
+    },
+    "pull_request": {
+      "v4": {
+        "n": 785,
+        "nonempty": 232,
+        "rate": 0.29554140127388534,
+        "polar": 134,
+        "neutral_only": 98,
+        "aspects": {
+          "package_manager": 28,
+          "tooling_documentation": 63,
+          "type_system": 13,
+          "readability_maintainability": 17,
+          "libraries_frameworks": 21,
+          "diagnostics_debugging": 22,
+          "safety": 19,
+          "runtime_performance": 17,
+          "compile_time": 11,
+          "learning_curve": 1,
+          "api_extensibility": 33,
+          "ownership": 5,
+          "community": 1
+        },
+        "classes": {
+          "positive": 108,
+          "neutral": 100,
+          "negative": 43
+        }
+      },
+      "v7": {
+        "n": 13756,
+        "nonempty": 555,
+        "rate": 0.04034603082291364,
+        "polar": 536,
+        "neutral_only": 19,
+        "aspects": {
+          "api_extensibility": 218,
+          "tooling_documentation": 44,
+          "diagnostics_debugging": 75,
+          "package_manager": 5,
+          "runtime_performance": 130,
+          "compile_time": 39,
+          "readability_maintainability": 52,
+          "safety": 38,
+          "type_system": 14,
+          "libraries_frameworks": 6,
+          "ownership": 24,
+          "learning_curve": 4,
+          "community": 1
+        },
+        "classes": {
+          "positive": 468,
+          "negative": 136,
+          "neutral": 46
+        }
+      }
+    }
+  },
+  "v7_standardized_to_v4": {
+    "source_type": 0.053325237297836024,
+    "repo_id": 0.05295672521102241,
+    "repo_id+source_type": 0.05297001551783972
+  },
+  "cleaning_audit": {
+    "seed": 20260913,
+    "random_n": 1500,
+    "random_nonempty": 85,
+    "flags": {
+      "fenced_block": 219,
+      "quote": 99,
+      "under_40_chars": 160,
+      "checkbox": 35,
+      "html_details": 4
+    },
+    "bot_candidate_n": 49,
+    "bot_candidate_nonempty": 0,
+    "actual_v2_matches": 1500,
+    "same_raw": 1500,
+    "changed_by_v2": 230,
+    "placeholder_only_ids": [
+      814617,
+      1327260,
+      1340256,
+      1346839,
+      1349258,
+      1324563
+    ]
+  }
+}

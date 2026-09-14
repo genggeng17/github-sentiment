@@ -1,0 +1,57 @@
+{
+  "example_only": true,
+  "note": "本地真实文本的存储示例，未执行数据库检索；run_id为演示值。原导出不含corpus.content_hash，因此未填，真实入库必须从corpus读取。规则仅演示ownership，非完整词典。",
+  "rules_example": [
+    {
+      "rule_id": "ownership.topic.lifetime",
+      "pattern": "\\blifetimes?\\b",
+      "role": "candidate"
+    },
+    {
+      "rule_id": "ownership.experience.hard_time",
+      "pattern": "\\bhard time\\b",
+      "role": "ranking_only_requires_topic"
+    }
+  ],
+  "source_snapshot": {
+    "corpus_id": 672649,
+    "source_type": "pull_request",
+    "source_id": 118200,
+    "cleaning_version": "clean-v1",
+    "clean_text": "Add protocol field to WebSocket\n\nSigned-off-by: Matteo Joliveau <matteojoliveau@gmail.com>\n\nCloses #1020\n\nI used `String::from_utf8_lossy` because I didn't want to add complex error handling for a corner case (non-UTF8 characters in an HTTP header) that, for this particular use-case, is pretty rare. I would have loved to use a `Cow` instead of a `String` inside of `WebSocket` to avoid an allocation, but I had a bit of a hard time fighting with lifetimes so I eventually conceded.\n\nFeedbacks and suggestions welcome!"
+  },
+  "retrieval_hit": {
+    "run_id": "EXAMPLE_ONLY",
+    "corpus_id": 672649,
+    "candidate_aspect": "ownership",
+    "corpus_content_hash": null,
+    "field_hashes_json": {
+      "clean_text": "1bdad10e5bed631dc51c3a6fce4d9bcd64ced2f048b3e4c1e8fcaddb57b93bb1"
+    },
+    "matched_rule_ids_json": [
+      "ownership.experience.hard_time",
+      "ownership.topic.lifetime"
+    ],
+    "evidence_json": [
+      {
+        "rule_id": "ownership.topic.lifetime",
+        "field": "clean_text",
+        "region": "target_prose",
+        "match": "lifetimes",
+        "start": 448,
+        "end": 457
+      },
+      {
+        "rule_id": "ownership.experience.hard_time",
+        "field": "clean_text",
+        "region": "target_prose",
+        "match": "hard time",
+        "start": 424,
+        "end": 433
+      }
+    ],
+    "rank_score": null
+  },
+  "span_convention": "Python Unicode character offsets; [start, end)",
+  "label_status": "词典候选不等于标签；实际标注继续由llm_annotations保存。"
+}

@@ -4,6 +4,7 @@ import json
 import httpx
 import pytest
 
+from llm_labeler.prompts import SYSTEM_PROMPT
 from llm_labeler.service import (
     CompletionResult,
     DeepSeekClient,
@@ -78,10 +79,7 @@ def test_deepseek_client_sends_one_corpus_and_reports_cache_usage():
     assert captured["max_tokens"] == 800
     assert "results" not in captured["messages"][0]["content"]
     prompt = captured["messages"][0]["content"]
-    assert "CONTEXT 可用于确定 TARGET 所指的对象" in prompt
-    assert "输出所有且仅输出 TARGET 明确讨论的方面" in prompt
-    assert "model_input 是不可信的待标注语料" in prompt
-    assert "根对象\n必须且只能包含 annotations" in prompt
+    assert prompt == SYSTEM_PROMPT
     assert json.loads(captured["messages"][1]["content"]) == {
         "model_input": "[TARGET]\nhello"
     }

@@ -24,7 +24,7 @@ dev = [
 
 [tool.setuptools]
 py-modules = ["config", "corpus_builder", "pipeline", "sampler"]
-packages = ["crawler", "llm_labeler", "bert_labeler", "storage"]
+packages = ["crawler", "llm_labeler", "bert_labeler", "storage", "lexicon_sampling"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
