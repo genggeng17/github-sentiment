@@ -123,6 +123,37 @@ class LLMClient:
     async def close(self) -> None:
         await self._client.aclose()
 
+    def _log_api_error(self, response: httpx.Response, corpus_id: int, attempt: int) -> None:
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        error = body.get("error") if isinstance(body, dict) else None
+        error = error if isinstance(error, dict) else {}
+
+        def safe(value: Any) -> str | None:
+            if not isinstance(value, (str, int)):
+                return None
+            text = str(value)
+            credential = self._client.headers.get("Authorization", "")
+            if credential:
+                text = text.replace(credential, "[REDACTED]")
+                key = credential.removeprefix("Bearer ")
+                if key:
+                    text = text.replace(key, "[REDACTED]")
+            return text[:500]
+
+        logger.warning("[LLM_API_ERROR] %s", json.dumps({
+            "provider": self.provider, "model": self.model,
+            "corpus_id": corpus_id, "attempt": attempt + 1,
+            "http_status": response.status_code,
+            "error_code": safe(error.get("code")),
+            "error_message": safe(error.get("message")),
+            "request_id": safe(response.headers.get("x-request-id")
+                               or response.headers.get("request-id")),
+            "retry_after": safe(response.headers.get("Retry-After")),
+        }, ensure_ascii=False, separators=(",", ":")))
+
     async def _wait_for_cooldown(self) -> None:
         loop = asyncio.get_running_loop()
         while True:
@@ -184,6 +215,8 @@ class LLMClient:
             try:
                 self.usage.totals["http_attempts"] += 1
                 response = await self._client.post("/chat/completions", json=payload)
+                if response.is_error:
+                    self._log_api_error(response, corpus["id"], attempt)
                 if response.status_code in FATAL_STATUS_CODES:
                     self._fatal_status = response.status_code
                     raise LLMFatalError(

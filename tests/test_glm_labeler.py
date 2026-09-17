@@ -11,6 +11,33 @@ from config import Settings
 from llm_labeler.service import LLMClient
 
 
+@pytest.mark.parametrize("as_json", [True, False])
+def test_api_error_diagnostics(caplog, as_json):
+    async def run():
+        def handler(request):
+            kwargs = ({"json": {"error": {"code": "1302", "message": "limit secret-key"}}}
+                      if as_json else {"text": "private response body"})
+            return httpx.Response(429, headers={"Retry-After": "20"}, **kwargs)
+
+        client = LLMClient("secret-key", "https://example.com", "test", max_retries=0,
+                           transport=httpx.MockTransport(handler))
+        try:
+            with pytest.raises(RuntimeError, match="重试耗尽"):
+                await client.complete({"id": 1, "model_input": "private corpus"})
+        finally:
+            await client.close()
+
+    asyncio.run(run())
+    records = [r.message for r in caplog.records if "[LLM_API_ERROR]" in r.message]
+    assert len(records) == 1
+    data = json.loads(records[0].split("[LLM_API_ERROR] ", 1)[1])
+    assert data["http_status"] == 429
+    assert data["retry_after"] == "20"
+    assert data["error_code"] == ("1302" if as_json else None)
+    assert "secret-key" not in records[0]
+    assert "private" not in records[0]
+
+
 @pytest.fixture
 def clean_environment(monkeypatch):
     monkeypatch.setattr(config, "load_dotenv", lambda: None)
