@@ -6,7 +6,7 @@
 ## 数据流程
 
 ```text
-GitHub 数据采集 → 文本清洗与去重 → DeepSeek 标注 → 人工抽检 → 导出训练数据
+GitHub 数据采集 → 文本清洗与去重 → LLM 标注（默认 GLM）→ 人工抽检 → 导出训练数据
 ```
 
 ## 版本变量与历史
@@ -20,8 +20,8 @@ GitHub 数据采集 → 文本清洗与去重 → DeepSeek 标注 → 人工抽�
 | 语料构建 | `CLEANING_VERSION` / `corpus.cleaning_version` | `clean-v2` | 标识清洗和模型输入构造规则，并参与 `content_hash` 计算；`model_input_chars` 保存输入字符数供采样过滤 |
 | 采样 | `corpus_sample_sets.name` | 运行时指定，如 `rust-v1` | 标识不可变采样集；还需结合清洗版本、每仓库上限、`seed` 和候选语料字符上限追溯 |
 | 标签体系 | `TAXONOMY_VERSION` / `llm_annotations.taxonomy_version` | `rust-aspects-v2` | 标识允许输出的方面及其定义 |
-| Prompt | `PROMPT_VERSION` / `llm_annotations.prompt_version` | `aspect-sentiment-zh-v7` | 标识提示词、输入输出协议和标注规则 |
-| LLM | `DEEPSEEK_MODEL` / `llm_annotations.model_name` | `deepseek-v4-flash` | 标识实际调用的模型；可由 `.env` 覆盖 |
+| Prompt | `PROMPT_VERSION` / `llm_annotations.prompt_version` | `aspect-sentiment-zh-v8` | 标识提示词、输入输出协议和标注规则 |
+| LLM | `LLM_PROVIDER`、`GLM_MODEL` / `llm_annotations.model_name` | `glm`、`glm-5.3-flash` | 默认智谱 BigModel；显式选择 deepseek 时读取 `DEEPSEEK_MODEL` |
 | BERT | `bert_predictions.model_version` | 暂无固定值 | 为后续 BERT/ONNX 推理预留，当前阶段尚未提供具体模型 |
 
 现有代码和 Git 历史中的变更记录如下：

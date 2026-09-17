@@ -12,7 +12,7 @@ from config import MAX_LLM_CONCURRENCY, Settings, normalize_repository_name
 from corpus import CLEANING_VERSION, CorpusBuilder, CorpusSampler
 from crawler import CollectionLimits, GitHubClient, GitHubCollector
 from lexicon import LexiconSampler, parse_quotas
-from llm_labeler.service import DeepSeekClient, DeepSeekLabeler
+from llm_labeler.service import LLMClient, LLMLabeler
 from storage import Storage
 from storage.models import RunStatus
 
@@ -160,6 +160,11 @@ class Pipeline:
         concurrency: int | None = None,
     ) -> dict[str, int]:
         self.settings.require_labeling()
+        logger.info(
+            "LLM 标注配置: provider=%s model=%s",
+            self.settings.llm_provider,
+            self.settings.labeling_model,
+        )
         sample_set_id = (
             self.storage.completed_sample_set_id(sample_name) if sample_name else None
         )
@@ -168,17 +173,26 @@ class Pipeline:
         )
 
         async def run_labeler() -> dict[str, int]:
-            client = DeepSeekClient(
-                self.settings.deepseek_api_key,
-                self.settings.deepseek_base_url,
-                self.settings.deepseek_model,
+            client = LLMClient(
+                self.settings.labeling_api_key,
+                self.settings.labeling_base_url,
+                self.settings.labeling_model,
                 concurrency=effective_concurrency,
+                provider=self.settings.llm_provider,
+                reasoning_effort=self.settings.glm_reasoning_effort,
+                max_tokens=(
+                    self.settings.glm_max_tokens if self.settings.llm_provider == "glm" else 800
+                ),
                 user_id=self.settings.deepseek_user_id,
-                timeout_seconds=max(60, self.settings.http_timeout_seconds),
+                timeout_seconds=(
+                    self.settings.glm_timeout_seconds
+                    if self.settings.llm_provider == "glm"
+                    else max(60, self.settings.http_timeout_seconds)
+                ),
                 max_retries=self.settings.http_max_retries,
             )
             try:
-                return await DeepSeekLabeler(
+                return await LLMLabeler(
                     client,
                     self.storage,
                     concurrency=effective_concurrency,
@@ -329,12 +343,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=llm_concurrency,
         default=None,
         help=(
-            "同时进行的独立 DeepSeek 请求数（默认读取 LLM_CONCURRENCY，"
+            "同时进行的独立 LLM 请求数（默认读取 LLM_CONCURRENCY，"
             f"上限 {MAX_LLM_CONCURRENCY}）"
         ),
     )
-    run = subparsers.add_parser("run", help="执行采集、语料构建和 DeepSeek 标注")
-    run.add_argument("--skip-label", action="store_true", help="跳过 DeepSeek 标注")
+    run = subparsers.add_parser("run", help="执行采集、语料构建和 LLM 标注")
+    run.add_argument("--skip-label", action="store_true", help="跳过 LLM 标注")
     add_collection_limit_arguments(run)
     run.add_argument(
         "--sample-name",
@@ -364,7 +378,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=llm_concurrency,
         default=None,
         help=(
-            "标注阶段同时进行的独立 DeepSeek 请求数（默认读取 LLM_CONCURRENCY，"
+            "标注阶段同时进行的独立 LLM 请求数（默认读取 LLM_CONCURRENCY，"
             f"上限 {MAX_LLM_CONCURRENCY}）"
         ),
     )

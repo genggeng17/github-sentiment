@@ -35,7 +35,7 @@ class CompletionResult:
     server_errors: int = 0
 
 
-class DeepSeekRequestError(RuntimeError):
+class LLMRequestError(RuntimeError):
     def __init__(
         self,
         message: str,
@@ -50,7 +50,7 @@ class DeepSeekRequestError(RuntimeError):
         self.server_errors = server_errors
 
 
-class DeepSeekFatalError(DeepSeekRequestError):
+class LLMFatalError(LLMRequestError):
     def __init__(self, message: str, *, status_code: int):
         super().__init__(message)
         self.status_code = status_code
@@ -60,13 +60,16 @@ class LabelingCircuitBreakerError(RuntimeError):
     pass
 
 
-class DeepSeekClient:
+class LLMClient:
     def __init__(
         self,
         api_key: str,
         base_url: str,
         model: str,
         *,
+        provider: str = "deepseek",
+        reasoning_effort: str = "low",
+        max_tokens: int | None = None,
         concurrency: int = 20,
         user_id: str = "rust-sentiment-labeler",
         timeout_seconds: int = 60,
@@ -74,17 +77,29 @@ class DeepSeekClient:
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         transport: httpx.AsyncBaseTransport | None = None,
     ):
+        if provider not in {"glm", "deepseek"}:
+            raise ValueError("provider 必须为 glm 或 deepseek")
+        if provider == "glm" and reasoning_effort not in {"low", "high", "max"}:
+            raise ValueError("GLM reasoning_effort 必须为 low、high 或 max")
+        resolved_max_tokens = max_tokens if max_tokens is not None else (
+            8192 if provider == "glm" else 800
+        )
+        if type(resolved_max_tokens) is not int or not 1 <= resolved_max_tokens <= 131072:
+            raise ValueError("max_tokens 必须为 1 到 131072 之间的整数")
         if not 1 <= concurrency <= MAX_LLM_CONCURRENCY:
             raise ValueError(
-                f"DeepSeek 并发量必须在 1 到 {MAX_LLM_CONCURRENCY} 之间"
+                f"LLM 并发量必须在 1 到 {MAX_LLM_CONCURRENCY} 之间"
             )
-        normalized_user_id = user_id.strip()
+        normalized_user_id = user_id.strip() if provider == "deepseek" else ""
         if normalized_user_id and (
             len(normalized_user_id) > 512
             or re.fullmatch(r"[a-zA-Z0-9\-_]+", normalized_user_id) is None
         ):
-            raise ValueError("DeepSeek user_id 只能包含字母、数字、连字符和下划线")
+            raise ValueError("LLM user_id 只能包含字母、数字、连字符和下划线")
         self.model = model
+        self.provider = provider
+        self.reasoning_effort = reasoning_effort
+        self.max_tokens = resolved_max_tokens
         self.max_retries = max_retries
         self.user_id = normalized_user_id
         self._sleep = sleep
@@ -131,8 +146,8 @@ class DeepSeekClient:
 
     async def complete(self, corpus: dict[str, Any]) -> CompletionResult:
         if self._fatal_status is not None:
-            raise DeepSeekFatalError(
-                f"DeepSeek 全局熔断已触发: HTTP {self._fatal_status}",
+            raise LLMFatalError(
+                f"LLM 全局熔断已触发: HTTP {self._fatal_status}",
                 status_code=self._fatal_status,
             )
         model_input = json.dumps(
@@ -147,11 +162,13 @@ class DeepSeekClient:
                 {"role": "user", "content": model_input},
             ],
             "response_format": {"type": "json_object"},
-            "thinking": {"type": "disabled"},
-            "temperature": 0,
-            "max_tokens": 800,
+            "thinking": {"type": "enabled" if self.provider == "glm" else "disabled"},
+            "temperature": 1 if self.provider == "glm" else 0,
+            "max_tokens": self.max_tokens,
             "stream": False,
         }
+        if self.provider == "glm":
+            payload["reasoning_effort"] = self.reasoning_effort
         if self.user_id:
             payload["user_id"] = self.user_id
 
@@ -165,14 +182,14 @@ class DeepSeekClient:
                 response = await self._client.post("/chat/completions", json=payload)
                 if response.status_code in FATAL_STATUS_CODES:
                     self._fatal_status = response.status_code
-                    raise DeepSeekFatalError(
-                        "DeepSeek 全局配置或鉴权错误，已立即停止全部标注请求: "
+                    raise LLMFatalError(
+                        "LLM 全局配置或鉴权错误，已立即停止全部标注请求: "
                         f"HTTP {response.status_code}",
                         status_code=response.status_code,
                     )
                 if response.status_code in RETRYABLE_STATUS_CODES:
                     raise httpx.HTTPStatusError(
-                        "DeepSeek 暂时不可用",
+                        "LLM 暂时不可用",
                         request=response.request,
                         response=response,
                     )
@@ -180,10 +197,12 @@ class DeepSeekClient:
                 body = response.json()
                 choice = body["choices"][0]
                 if choice.get("finish_reason") == "length":
-                    raise ValueError("DeepSeek 单条响应因达到长度上限而被截断")
+                    raise ValueError("LLM 单条响应因达到长度上限而被截断")
+                if choice.get("finish_reason") not in {None, "stop"}:
+                    raise ValueError(f"LLM 未正常完成: {choice.get('finish_reason')}")
                 content = choice["message"]["content"]
                 if not isinstance(content, str) or not content.strip():
-                    raise ValueError("DeepSeek 返回空内容")
+                    raise ValueError("LLM 返回空内容")
                 usage = body.get("usage") or {}
                 prompt_details = usage.get("prompt_tokens_details") or {}
                 cache_hit_tokens = usage.get(
@@ -210,8 +229,8 @@ class DeepSeekClient:
                     else None
                 )
                 if status is not None and status not in RETRYABLE_STATUS_CODES:
-                    raise DeepSeekRequestError(
-                        f"DeepSeek 不可恢复错误: HTTP {status}",
+                    raise LLMRequestError(
+                        f"LLM 不可恢复错误: HTTP {status}",
                         retries=attempt,
                         rate_limited=rate_limited,
                         server_errors=server_errors,
@@ -226,23 +245,23 @@ class DeepSeekClient:
                 if status in {429, 503}:
                     await self._extend_cooldown(delay)
                 logger.warning(
-                    "DeepSeek 语料 %s 调用失败，%.1f 秒后重试",
+                    "LLM 语料 %s 调用失败，%.1f 秒后重试",
                     corpus["id"],
                     delay,
                 )
                 await self._sleep(delay)
-        raise DeepSeekRequestError(
-            f"DeepSeek 请求重试耗尽: {last_error}",
+        raise LLMRequestError(
+            f"LLM 请求重试耗尽: {last_error}",
             retries=self.max_retries,
             rate_limited=rate_limited,
             server_errors=server_errors,
         ) from last_error
 
 
-class DeepSeekLabeler:
+class LLMLabeler:
     def __init__(
         self,
-        client: DeepSeekClient,
+        client: LLMClient,
         storage: Storage,
         *,
         concurrency: int = 20,
@@ -306,9 +325,9 @@ class DeepSeekLabeler:
             parsed = validate_annotation(raw_response)
             status = "succeeded"
             error = None
-        except DeepSeekFatalError:
+        except LLMFatalError:
             raise
-        except DeepSeekRequestError as exc:
+        except LLMRequestError as exc:
             metrics.update(
                 retries=exc.retries,
                 rate_limited=exc.rate_limited,
@@ -419,7 +438,7 @@ class DeepSeekLabeler:
                 await flush_write_buffer()
             if consecutive_failures >= self.max_consecutive_failures:
                 raise LabelingCircuitBreakerError(
-                    "DeepSeek 标注连续失败达到 "
+                    "LLM 标注连续失败达到 "
                     f"{self.max_consecutive_failures} 条，已熔断并取消剩余请求"
                 )
 
@@ -451,7 +470,7 @@ class DeepSeekLabeler:
                 if limit is not None and stats["read"] >= limit:
                     return stats
             return stats
-        except (DeepSeekFatalError, LabelingCircuitBreakerError):
+        except (LLMFatalError, LabelingCircuitBreakerError):
             for task in active_tasks:
                 task.cancel()
             if active_tasks:
@@ -469,3 +488,10 @@ class DeepSeekLabeler:
         return asyncio.run(
             self.label_pending_async(limit=limit, sample_set_id=sample_set_id)
         )
+
+
+# 保留旧导入名，兼容现有调用方；实际供应商由 provider 决定。
+DeepSeekClient = LLMClient
+DeepSeekLabeler = LLMLabeler
+DeepSeekRequestError = LLMRequestError
+DeepSeekFatalError = LLMFatalError

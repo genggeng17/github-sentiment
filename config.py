@@ -55,6 +55,13 @@ class Settings:
     cursor_overlap_seconds: int = 300
     http_timeout_seconds: int = 30
     http_max_retries: int = 5
+    llm_provider: str = "glm"
+    glm_api_key: str = ""
+    glm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
+    glm_model: str = "glm-5.3-flash"
+    glm_reasoning_effort: str = "low"
+    glm_max_tokens: int = 8192
+    glm_timeout_seconds: int = 180
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"
@@ -69,6 +76,12 @@ class Settings:
     @classmethod
     def from_env(cls) -> Settings:
         load_dotenv()
+        provider = os.getenv("LLM_PROVIDER", "glm").strip().lower()
+        if provider not in {"glm", "deepseek"}:
+            raise ValueError("LLM_PROVIDER 必须为 glm 或 deepseek")
+        reasoning_effort = os.getenv("GLM_REASONING_EFFORT", "low").strip().lower()
+        if reasoning_effort not in {"low", "high", "max"}:
+            raise ValueError("GLM_REASONING_EFFORT 必须为 low、high 或 max")
         repos = tuple(
             dict.fromkeys(
                 normalize_repository_name(item)
@@ -89,6 +102,15 @@ class Settings:
             cursor_overlap_seconds=_positive_int("GITHUB_CURSOR_OVERLAP_SECONDS", 300),
             http_timeout_seconds=_positive_int("HTTP_TIMEOUT_SECONDS", 30),
             http_max_retries=_positive_int("HTTP_MAX_RETRIES", 5),
+            llm_provider=provider,
+            glm_api_key=os.getenv("GLM_API_KEY", "").strip(),
+            glm_base_url=os.getenv(
+                "GLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"
+            ).strip().rstrip("/"),
+            glm_model=os.getenv("GLM_MODEL", "glm-5.3-flash").strip(),
+            glm_reasoning_effort=reasoning_effort,
+            glm_max_tokens=_bounded_positive_int("GLM_MAX_TOKENS", 8192, 131072),
+            glm_timeout_seconds=_positive_int("GLM_TIMEOUT_SECONDS", 180),
             deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
             deepseek_base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip(
                 "/"
@@ -118,5 +140,22 @@ class Settings:
             raise ValueError("采集需要设置 GITHUB_TOKEN")
 
     def require_labeling(self) -> None:
-        if not self.deepseek_api_key:
-            raise ValueError("DeepSeek 标注需要设置 DEEPSEEK_API_KEY")
+        if self.llm_provider not in {"glm", "deepseek"}:
+            raise ValueError("LLM_PROVIDER 必须为 glm 或 deepseek")
+        if not self.labeling_api_key:
+            variable = "GLM_API_KEY" if self.llm_provider == "glm" else "DEEPSEEK_API_KEY"
+            raise ValueError(f"{self.llm_provider} 标注需要设置 {variable}")
+        if not self.labeling_model or not self.labeling_base_url:
+            raise ValueError("标注模型名和接口地址不能为空")
+
+    @property
+    def labeling_api_key(self) -> str:
+        return self.glm_api_key if self.llm_provider == "glm" else self.deepseek_api_key
+
+    @property
+    def labeling_base_url(self) -> str:
+        return self.glm_base_url if self.llm_provider == "glm" else self.deepseek_base_url
+
+    @property
+    def labeling_model(self) -> str:
+        return self.glm_model if self.llm_provider == "glm" else self.deepseek_model
