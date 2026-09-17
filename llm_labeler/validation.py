@@ -3,24 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-ASPECTS = frozenset(
-    {
-        "ownership",
-        "type_system",
-        "safety",
-        "runtime_performance",
-        "learning_curve",
-        "compile_time",
-        "diagnostics_debugging",
-        "tooling_documentation",
-        "readability_maintainability",
-        "api_extensibility",
-        "package_manager",
-        "libraries_frameworks",
-        "community",
-    }
-)
-CLASSES = frozenset({"negative", "neutral", "positive"})
+from taxonomy import ASPECTS, CLASSES
 
 
 class AnnotationValidationError(ValueError):

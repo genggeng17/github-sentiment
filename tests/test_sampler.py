@@ -3,9 +3,8 @@ from datetime import datetime
 import pytest
 from sqlalchemy import create_engine, func, select, update
 
-from corpus_builder import CLEANING_VERSION, CorpusBuilder
+from corpus import CLEANING_VERSION, CorpusBuilder, CorpusSampler
 from pipeline import build_parser
-from sampler import CorpusSampler
 from storage import Storage
 from storage.models import Corpus, CorpusSampleItem, CorpusSampleSet, Issue
 

@@ -1,6 +1,7 @@
 from datetime import datetime
 
-from corpus_builder import CLEANING_VERSION, clean_text, make_corpus_row, normalize_text
+from corpus.builder import make_corpus_row
+from corpus.cleaning import CLEANING_VERSION, clean_text, normalize_text
 
 
 def source(source_type, **overrides):

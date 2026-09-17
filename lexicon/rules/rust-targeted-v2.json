@@ -1,0 +1,408 @@
+{
+  "schema_version": 1,
+  "version": "rust-targeted-v2",
+  "description": "13 方面候选检索；保留 v1 四方面规则并补齐其余九方面。all 内表达式须在 TARGET 同一自然语言段落出现。命中不是标签，不预判情感；filters 可按方面覆盖公共筛选条件。",
+  "aspects": {
+    "ownership": {
+      "filters": {},
+      "rules": [
+        {
+          "id": "ownership.mechanisms",
+          "all": [
+            "\\b(?:borrow checker|borrow checking|ownership model|lifetime (?:elision|annotations?|parameters?|bounds?)|non.lexical lifetimes?|reborrowing|partial moves?|move semantics)\\b"
+          ]
+        },
+        {
+          "id": "ownership.constraints",
+          "all": [
+            "\\b(?:ownership|borrowing|borrows?|borrowed|lifetimes?)\\b",
+            "\\b(?:rust|mutab\\w*|immutab\\w*|alias\\w*|references?|owned|moves?|moving|clon\\w*|outlive\\w*|restrict\\w*|limit\\w*|elision|captur\\w*)\\b"
+          ]
+        },
+        {
+          "id": "ownership.transfer",
+          "all": [
+            "\\b(?:takes?|taking|transfers?|transferring|retain(?:s|ing)?|shares?|sharing) ownership\\b",
+            "\\b(?:buffers?|values?|variables?|references?|pointers?|handles?|strings?|vec|vectors?|objects?|self|data)\\b"
+          ]
+        },
+        {
+          "id": "ownership.zh",
+          "all": [
+            "所有权|借用检查|可变借用|不可变借用|移动语义|生命周期(?:约束|标注|省略|参数)|重借用"
+          ]
+        }
+      ]
+    },
+    "safety": {
+      "filters": {},
+      "rules": [
+        {
+          "id": "safety.mechanisms",
+          "all": [
+            "\\b(?:memory saf(?:e|ety)|thread saf(?:e|ety)|data races?|undefined behavio[ur]|use.after.free|double.free|dangling (?:pointers?|references?)|soundness|unsound(?:ness)?)\\b"
+          ]
+        },
+        {
+          "id": "safety.unsafe",
+          "all": [
+            "\\bunsafe\\b",
+            "\\b(?:invariants?|contracts?|guarantee\\w*|sound|safety|boundar\\w*|preconditions?|alias\\w*|audit\\w*|encapsulat\\w*|responsib\\w*)\\b"
+          ]
+        },
+        {
+          "id": "safety.send_sync",
+          "all": [
+            "\\b(?:Send|Sync)\\b",
+            "\\b(?:safety|soundness|unsound|data races?|thread.safe|across threads)\\b"
+          ]
+        },
+        {
+          "id": "safety.zh",
+          "all": [
+            "内存安全|线程安全|数据竞争|未定义行为|悬垂(?:指针|引用)|重复释放|释放后使用|安全不变量|不健全"
+          ]
+        }
+      ]
+    },
+    "runtime_performance": {
+      "filters": {},
+      "rules": [
+        {
+          "id": "runtime.metrics",
+          "all": [
+            "\\b(?:runtime performance|run.time (?:performance|overhead)|throughput|latency|memory (?:usage|consumption|footprint)|cpu (?:usage|utilization)|allocation overhead|cache locality|startup (?:time|latency))\\b"
+          ]
+        },
+        {
+          "id": "runtime.work",
+          "all": [
+            "\\b(?:queries|requests?|parsing|parser|serialization|deserialization|allocations?|disk reads?|i/o|hot path|execution)\\b",
+            "\\b(?:faster|slower|slow|fast|overhead|bottleneck|speedup|speed.up|wast\\w*|redundan\\w*|reduc\\w*|avoid\\w*)\\b"
+          ]
+        },
+        {
+          "id": "runtime.benchmarks",
+          "all": [
+            "\\b(?:runtime|throughput|latency|allocations?|memory|cpu|execut\\w*|queries|requests?)\\b",
+            "\\b(?:benchmarks?|profiling|regress\\w*|optimi[sz]\\w*|performan\\w*|efficien\\w*)\\b"
+          ]
+        },
+        {
+          "id": "runtime.zh",
+          "all": [
+            "运行(?:时)?性能|吞吐量|内存(?:占用|消耗)|CPU(?:占用|使用率)|启动(?:时间|耗时)|运行(?:速度|效率)|分配开销|缓存局部性|(?:请求|查询|网络)延迟"
+          ]
+        }
+      ]
+    },
+    "compile_time": {
+      "filters": {},
+      "rules": [
+        {
+          "id": "compile.metrics",
+          "all": [
+            "\\b(?:(?:compile|compilation|build|rebuild|linking|codegen) times?|compilation speed|build latency)\\b"
+          ]
+        },
+        {
+          "id": "compile.cost",
+          "all": [
+            "\\b(?:compil(?:e|es|ed|ing|ation)|builds?|building|rebuilds?|rebuilding|linking|codegen|code generation|monomorphization)\\b",
+            "\\b(?:slow(?:er)?|fast(?:er)?|speedup|speed.up|bottleneck|time.consuming|takes?|took|seconds?|minutes?|hours?|overhead)\\b"
+          ]
+        },
+        {
+          "id": "compile.incremental",
+          "all": [
+            "\\b(?:incremental (?:compilation|builds?)|recompil(?:e|es|ing|ation)|rebuilds?)\\b",
+            "\\b(?:cach\\w*|invalida\\w*|reuse|unnecessary|redundan\\w*|avoid\\w*|efficien\\w*)\\b"
+          ]
+        },
+        {
+          "id": "compile.zh",
+          "all": [
+            "(?:编译|构建|链接|代码生成)(?:时间|耗时|速度|效率|太慢|很慢)|增量编译|重复编译|不必要的重新编译"
+          ]
+        }
+      ]
+    },
+    "diagnostics_debugging": {
+      "filters": {},
+      "rules": [
+        {
+          "id": "diagnostics.quality",
+          "all": [
+            "\\b(?:diagnostics?|error messages?|warnings?|compiler errors?|help messages?|(?:compiler|fix|diagnostic|fix.it) suggestions?)\\b",
+            "\\b(?:explain\\w*|clear\\w*|unclear|confus\\w*|mislead\\w*|helpful|unhelpful|useful|useless|accurat\\w*|inaccurat\\w*|point(?:s|ed|ing)?|location|span|actionable|wording|wrong|incorrect|missing)\\b"
+          ]
+        },
+        {
+          "id": "diagnostics.debugging",
+          "all": [
+            "\\b(?:debugger|debugging|backtraces?|stack traces?|breakpoints?|gdb|lldb)\\b",
+            "\\b(?:inspect\\w*|step(?:ping)?|locat\\w*|diagnos\\w*|symbols?|variables?|frames?|unwind\\w*|useful|helpful|confus\\w*|mislead\\w*|missing|wrong|broken)\\b"
+          ]
+        },
+        {
+          "id": "diagnostics.localization",
+          "all": [
+            "\\b(?:track down|pinpoint|locate|identify|diagnose)\\b",
+            "\\b(?:root cause|source of (?:the |this )?(?:error|bug|panic)|cause of (?:the |this )?(?:error|bug|panic))\\b"
+          ]
+        },
+        {
+          "id": "diagnostics.zh",
+          "all": [
+            "错误提示|报错信息|诊断信息|警告|调试器|回溯|堆栈",
+            "清晰|准确|误导|困惑|有用|无用|定位|解释|建议|缺少|符号|变量"
+          ]
+        }
+      ]
+    },
+    "tooling_documentation": {
+      "filters": {},
+      "rules": [
+        {
+          "id": "tooling.tools",
+          "all": [
+            "\\b(?:rust.analyzer|clippy|rustfmt|rustdoc|ide|intellij|vscode|vs code|code completion|autocompletion)\\b",
+            "\\b(?:support\\w*|work(?:s|ing)?|fail\\w*|crash\\w*|slow|fast|hang\\w*|unresponsive|configur\\w*|format\\w*|completion|navigation|integrat\\w*|usab\\w*|reliab\\w*)\\b"
+          ]
+        },
+        {
+          "id": "tooling.docs",
+          "all": [
+            "\\b(?:documentation|docs|tutorials?|guides?|readme|rust book|api reference)\\b",
+            "\\b(?:explain\\w*|cover\\w*|lack\\w*|missing|outdated|incorrect|wrong|accurat\\w*|clear\\w*|unclear|confus\\w*|helpful|useful|incomplete|examples?|discover\\w*)\\b"
+          ]
+        },
+        {
+          "id": "tooling.examples",
+          "all": [
+            "\\b(?:examples?|tutorials?)\\b",
+            "\\b(?:documented|documentation|outdated|misleading|missing|incomplete|runnable|compilable|does not compile|do not compile)\\b"
+          ]
+        },
+        {
+          "id": "tooling.zh",
+          "all": [
+            "文档|教程|示例|rust-analyzer|Clippy|rustfmt|rustdoc|IDE",
+            "清晰|覆盖|缺少|过时|准确|误导|解释|补全|跳转|格式化|卡顿|崩溃|支持"
+          ]
+        }
+      ]
+    },
+    "readability_maintainability": {
+      "filters": {},
+      "rules": [
+        {
+          "id": "readability.properties",
+          "all": [
+            "\\b(?:readability|maintainability|testability|technical debt|code duplication|duplicated code|duplicate code|boilerplate|cyclomatic complexity|separation of concerns)\\b"
+          ]
+        },
+        {
+          "id": "readability.code",
+          "all": [
+            "\\b(?:code|implementation|function|module|refactor\\w*|logic|structure|design)\\b",
+            "\\b(?:readable|unreadable|maintainable|unmaintainable|unnecessarily complex|hard to (?:read|follow|maintain|test)|easier to (?:read|follow|maintain|test)|difficult to (?:read|follow|maintain|test)|easy to (?:read|follow|maintain|test)|duplicat\\w*|tightly coupled)\\b"
+          ]
+        },
+        {
+          "id": "readability.refactor",
+          "all": [
+            "\\brefactor\\w*\\b",
+            "\\b(?:simplif\\w*|complexity|coupling|duplication|modular\\w*|testab\\w*|readab\\w*)\\b"
+          ]
+        },
+        {
+          "id": "readability.zh",
+          "all": [
+            "可读性|可维护性|可测试性|技术债|重复代码|代码重复|样板代码|代码耦合|(?:代码|实现|逻辑)(?:难读|易读|复杂)|难以维护"
+          ]
+        }
+      ]
+    },
+    "api_extensibility": {
+      "filters": {},
+      "rules": [
+        {
+          "id": "api.properties",
+          "all": [
+            "\\b(?:api|interface|abstraction|trait|constructor|builder)\\b",
+            "\\b(?:ergonom\\w*|extensib\\w*|composab\\w*|customiz\\w*|customis\\w*|reusab\\w*|flexib\\w*|inconsisten\\w*|consisten\\w*|easy to use|easier to use|hard to use|difficult to (?:use|extend)|good defaults)\\b"
+          ]
+        },
+        {
+          "id": "api.extension",
+          "all": [
+            "\\b(?:api|interface|trait|methods?|constructor|fields?|parameters?|return type)\\b",
+            "\\b(?:expose|exposes|exposing|public|private|visibility|sealed|custom|third.party|downstream|extension points?|hooks?|backends?)\\b",
+            "\\b(?:expos\\w*|allow\\w*|enabl\\w*|prevent\\w*|custom\\w*|extend\\w*|implement\\w*|design|access\\w*|usab\\w*|reuse|integrat\\w*|breaking|chang\\w*)\\b"
+          ]
+        },
+        {
+          "id": "api.composition",
+          "all": [
+            "\\b(?:api|interface|abstraction|builder|callbacks?|plugins?)\\b",
+            "\\b(?:compos\\w*|integrat\\w*|extend\\w*|reuse|reusable|custom|configur\\w*)\\b"
+          ]
+        },
+        {
+          "id": "api.zh",
+          "all": [
+            "接口|API|抽象|构造器|构造函数|参数|返回类型",
+            "易用|一致|通用|组合|复用|定制|自定义|扩展|集成|可见性|公开|私有"
+          ]
+        }
+      ]
+    },
+    "community": {
+      "filters": {},
+      "rules": [
+        {
+          "id": "community.culture",
+          "all": [
+            "\\b(?:community|communities|contributors?|maintainers?|project governance|moderators?)\\b",
+            "\\b(?:welcom\\w*|inclusi\\w*|friendly|unfriendly|hostil\\w*|toxic\\w*|respect\\w*|harass\\w*|governance|conduct|collaborat\\w*|communicat\\w*|participat\\w*|burnout|onboarding|supportive)\\b"
+          ]
+        },
+        {
+          "id": "community.support",
+          "all": [
+            "\\b(?:maintainers?|community|contributors?|support (?:requests?|channels?|forums?))\\b",
+            "\\b(?:responsiveness|responsive|unresponsive|response times?|unanswered|ignored|helpful|unhelpful|triage|mentoring|mentorship|decision.making)\\b"
+          ]
+        },
+        {
+          "id": "community.process",
+          "all": [
+            "\\b(?:contribution guidelines?|contributor guide|code of conduct|governance model|rfc process|decision.making process)\\b"
+          ]
+        },
+        {
+          "id": "community.zh",
+          "all": [
+            "社区|维护者|贡献者|协作者",
+            "氛围|包容|友好|敌意|治理|协作|沟通|参与|响应|求助|指导|骚扰|行为准则"
+          ]
+        }
+      ]
+    },
+    "libraries_frameworks": {
+      "filters": {},
+      "rules": [
+        {
+          "id": "libraries.quality",
+          "all": [
+            "\\b(?:librar(?:y|ies)|crates?|frameworks?|ecosystem)\\b",
+            "\\b(?:matur\\w*|maintain\\w*|unmaintained|abandon\\w*|stabl\\w*|stability|reliab\\w*|unreliab\\w*|production.ready|compatib\\w*|incompatib\\w*)\\b"
+          ]
+        },
+        {
+          "id": "libraries.coverage",
+          "all": [
+            "\\b(?:librar(?:y|ies)|crates?|frameworks?|ecosystem)\\b",
+            "\\b(?:lack\\w*|missing|alternatives?|available|availability|support(?:s|ed)?|cross.platform)\\b"
+          ]
+        },
+        {
+          "id": "libraries.adoption",
+          "all": [
+            "\\b(?:librar(?:y|ies)|crates?|frameworks?)\\b",
+            "\\b(?:recommend\\w*|adopt\\w*|migrat\\w*|unusable|keeps? crashing|breaks? compatibility)\\b"
+          ]
+        },
+        {
+          "id": "libraries.zh",
+          "all": [
+            "第三方库|框架|生态|依赖库",
+            "成熟|稳定|维护|兼容|缺少|支持|可用|推荐"
+          ]
+        }
+      ]
+    },
+    "learning_curve": {
+      "filters": {},
+      "rules": [
+        {
+          "id": "learning.rust",
+          "all": [
+            "\\b(?:rust|ownership|borrowing|borrow checker|lifetimes?|traits?)\\b",
+            "\\b(?:learn\\w*|understand\\w*|confus\\w*|beginners?|newcomers?|newbies|intuit\\w*|unintuit\\w*)\\b"
+          ]
+        },
+        {
+          "id": "learning.cost",
+          "all": [
+            "\\b(?:rust|ownership|borrowing|lifetimes?|type system)\\b",
+            "\\b(?:learning curve|mental model|cognitive load|getting started|hard to grasp|difficult to grasp|took me .* to)\\b"
+          ]
+        },
+        {
+          "id": "learning.zh",
+          "all": [
+            "[Rr]ust|所有权|借用|生命周期|类型系统",
+            "学习|理解|入门|初学|心智|认知|难懂|困惑"
+          ]
+        }
+      ]
+    },
+    "package_manager": {
+      "filters": {},
+      "rules": [
+        {
+          "id": "package.cargo",
+          "all": [
+            "\\bcargo\\b",
+            "\\b(?:dependenc\\w*|resolver?|versions?|lockfiles?|workspace|features?|registr(?:y|ies)|publish\\w*|download\\w*)\\b"
+          ]
+        },
+        {
+          "id": "package.features",
+          "all": [
+            "\\b(?:default.features|feature unification|feature flags?|optional dependenc\\w*|dependency resolution|dependency conflicts?|version conflicts?|semver|lockfile|Cargo\\.lock|Cargo\\.toml|crates\\.io)\\b"
+          ]
+        },
+        {
+          "id": "package.workspace",
+          "all": [
+            "\\bworkspace\\b",
+            "\\b(?:members?|dependenc\\w*|inherit\\w*|resolver?|features?)\\b"
+          ]
+        },
+        {
+          "id": "package.zh",
+          "all": [
+            "依赖解析|版本冲突|默认特性|包管理|锁文件|依赖管理|依赖版本"
+          ]
+        }
+      ]
+    },
+    "type_system": {
+      "filters": {},
+      "rules": [
+        {
+          "id": "types.mechanisms",
+          "all": [
+            "\\b(?:type inference|type system|type safety|type checking|type constraints?|type annotations?|type parameters?|associated types?|higher.ranked|variadic generics|const generics|generic associated types|static dispatch|dynamic dispatch|trait objects?|trait bounds?|impl trait)\\b"
+          ]
+        },
+        {
+          "id": "types.generics",
+          "all": [
+            "\\b(?:generics?|traits?)\\b",
+            "\\b(?:express\\w*|infer\\w*|bounds?|constraints?|specializ\\w*|coherence|implement\\w*|monomorph\\w*|limitation\\w*)\\b"
+          ]
+        },
+        {
+          "id": "types.zh",
+          "all": [
+            "类型推导|类型系统|关联类型|泛型|类型约束|特征约束|动态分派|静态分派"
+          ]
+        }
+      ]
+    }
+  }
+}

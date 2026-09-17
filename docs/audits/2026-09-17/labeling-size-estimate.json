@@ -1,0 +1,9 @@
+{
+  "encoding": "o200k_base",
+  "eligible_rows": 4884,
+  "system_prompt_tokens": 2580,
+  "user_json_tokens_mean": 137.71,
+  "user_json_tokens_p50": 78,
+  "user_json_tokens_p95": 456,
+  "note": "Offline tokenizer proxy; excludes schema/message framing, Codex harness, reasoning and output. No model calls."
+}

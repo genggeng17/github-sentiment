@@ -1,4 +1,4 @@
-"""独立词典集入口；命令行只需依赖此处的公开接口。"""
+"""词典模块入口；采样代码与内置 rules/ 词典统一放在本包。"""
 
 from .config import parse_quotas
 from .sampler import LexiconSampler

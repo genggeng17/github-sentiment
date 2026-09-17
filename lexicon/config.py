@@ -7,7 +7,7 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from llm_labeler.validation import ASPECTS
+from taxonomy import ASPECTS
 
 SOURCE_TYPES = {"issue", "pull_request", "issue_comment", "pr_issue_comment", "pr_review_comment"}
 

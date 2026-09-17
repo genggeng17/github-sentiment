@@ -6,9 +6,10 @@ import logging
 import time
 from typing import Any
 
-from corpus_builder import CLEANING_VERSION
 from storage import Storage
 from storage.models import utcnow
+
+from .cleaning import CLEANING_VERSION
 
 logger = logging.getLogger(__name__)
 

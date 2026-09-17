@@ -1,7 +1,8 @@
 # 提示词保留完整自然段，避免源码续行把单词和中文句子切碎。
 # ruff: noqa: E501
 
-TAXONOMY_VERSION = "rust-aspects-v2"
+from taxonomy import TAXONOMY_VERSION as TAXONOMY_VERSION
+
 PROMPT_VERSION = "aspect-sentiment-zh-v8"
 
 ASPECT_DESCRIPTIONS = """

@@ -1,5 +1,7 @@
+from taxonomy import ASPECTS, CLASSES
+
 from .service import DeepSeekLabeler
-from .validation import ASPECTS, CLASSES, validate_annotation
+from .validation import validate_annotation
 
 __all__ = [
     "ASPECTS",

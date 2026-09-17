@@ -23,8 +23,12 @@ dev = [
 ]
 
 [tool.setuptools]
-py-modules = ["config", "corpus_builder", "pipeline", "sampler"]
-packages = ["crawler", "llm_labeler", "bert_labeler", "storage", "lexicon_sampling"]
+include-package-data = false
+py-modules = ["config", "pipeline", "taxonomy"]
+packages = ["corpus", "crawler", "lexicon", "llm_labeler", "bert_labeler", "storage"]
+
+[tool.setuptools.package-data]
+lexicon = ["rules/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,16 +1,32 @@
 import json
 from datetime import datetime
+from importlib.resources import files
 
 import pytest
 from sqlalchemy import create_engine, select
 
-from corpus_builder import CLEANING_VERSION, CorpusBuilder
-from lexicon_sampling import LexiconSampler, parse_quotas
-from lexicon_sampling.matcher import LexiconMatcher
+from corpus import CLEANING_VERSION, CorpusBuilder, CorpusSampler
+from lexicon import LexiconSampler, parse_quotas
+from lexicon.matcher import LexiconMatcher
 from pipeline import build_parser
-from sampler import CorpusSampler
 from storage import Storage
 from storage.models import Corpus, CorpusSampleItem, LexiconSampleHit
+
+
+@pytest.mark.parametrize(
+    ("aspect", "text"),
+    [
+        ("libraries_frameworks", "The library is mature and stable."),
+        ("learning_curve", "Learning Rust is confusing."),
+        ("package_manager", "Cargo dependency resolution is reliable."),
+        ("type_system", "Type inference works well here."),
+    ],
+)
+def test_bundled_rules_match_each_supported_aspect(aspect, text):
+    resource = files("lexicon").joinpath("rules", "rust-targeted-v1.json")
+    definition = json.loads(resource.read_text(encoding="utf-8"))
+    matcher = LexiconMatcher(definition, dict.fromkeys(definition["aspects"], 1))
+    assert set(matcher.match(text)) == {aspect}
 
 
 @pytest.fixture

@@ -12,10 +12,11 @@ from typing import Any
 import httpx
 
 from config import MAX_LLM_CONCURRENCY
-from corpus_builder import CLEANING_VERSION
+from corpus import CLEANING_VERSION
 from storage import Storage
+from taxonomy import TAXONOMY_VERSION
 
-from .prompts import PROMPT_VERSION, SYSTEM_PROMPT, TAXONOMY_VERSION
+from .prompts import PROMPT_VERSION, SYSTEM_PROMPT
 from .validation import AnnotationValidationError, validate_annotation
 
 logger = logging.getLogger(__name__)

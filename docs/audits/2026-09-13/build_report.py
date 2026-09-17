@@ -129,14 +129,14 @@ for r in case_rows:
 (ROOT / '案例复核.md').write_text('\n'.join(lines), encoding='utf-8')
 
 # Run the actual cleaner implementation without importing database dependencies.
-tree = ast.parse((REPO / 'corpus_builder.py').read_text(encoding='utf-8'))
+tree = ast.parse((REPO / 'corpus/cleaning.py').read_text(encoding='utf-8'))
 nodes = []
 for n in tree.body:
     if isinstance(n, ast.Import) and all(a.name in ('re', 'unicodedata') for a in n.names): nodes.append(n)
     elif isinstance(n, ast.Assign): nodes.append(n)
     elif isinstance(n, ast.FunctionDef) and n.name != 'make_corpus_row': nodes.append(n)
 ns = {}
-exec(compile(ast.Module(body=nodes, type_ignores=[]), 'corpus_builder.py', 'exec'), ns)
+exec(compile(ast.Module(body=nodes, type_ignores=[]), 'corpus/cleaning.py', 'exec'), ns)
 synthetic = {
  '代码框中的自然语言': 'The result is:\n```text\nThe new API is much harder to use.\n```',
  '堆栈后没有空行的体验描述': 'stack backtrace:\n   0: fail\nThis crashes every day and blocks my work.\n',

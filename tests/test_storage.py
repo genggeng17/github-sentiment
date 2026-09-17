@@ -5,7 +5,7 @@ from sqlalchemy import create_engine, func, inspect, select, text
 from sqlalchemy.dialects import mysql
 from sqlalchemy.schema import CreateTable
 
-from corpus_builder import CorpusBuilder
+from corpus import CorpusBuilder
 from storage import Storage
 from storage.database import MissingParentError
 from storage.models import (

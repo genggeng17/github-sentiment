@@ -9,11 +9,10 @@ from collections.abc import Callable
 from typing import Any
 
 from config import MAX_LLM_CONCURRENCY, Settings, normalize_repository_name
-from corpus_builder import CLEANING_VERSION, CorpusBuilder
+from corpus import CLEANING_VERSION, CorpusBuilder, CorpusSampler
 from crawler import CollectionLimits, GitHubClient, GitHubCollector
-from lexicon_sampling import LexiconSampler, parse_quotas
+from lexicon import LexiconSampler, parse_quotas
 from llm_labeler.service import DeepSeekClient, DeepSeekLabeler
-from sampler import CorpusSampler
 from storage import Storage
 from storage.models import RunStatus
 

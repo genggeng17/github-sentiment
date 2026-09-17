@@ -1,0 +1,77 @@
+{
+  "input_file": "data/exports/rust-v1-5000.jsonl",
+  "input_sha256": "d67ef45ac294f3e73ba18b7580f9b6d3d4efbac17173546074c135b2e1133e0b",
+  "rows": 4972,
+  "unique_ids": 4972,
+  "eligible_rows_max4000": 4884,
+  "versions": {
+    "v1": {
+      "lexicon_sha256": "9fc3040ab84ef43459b0e6a6010524ef71eb36266c452ff3fe3dafa3d13c5731",
+      "rules": 14,
+      "matched_rows": 426,
+      "aspect_hits": {
+        "learning_curve": 32,
+        "libraries_frameworks": 104,
+        "package_manager": 255,
+        "type_system": 94
+      },
+      "eligible_matched_rows": 402,
+      "eligible_aspect_hits": {
+        "learning_curve": 30,
+        "libraries_frameworks": 98,
+        "package_manager": 235,
+        "type_system": 92
+      },
+      "elapsed_seconds": 2.028
+    },
+    "v2": {
+      "lexicon_sha256": "45b121936dca6efe48a3b242d2bbf612c222d47ef5d039c6675d1bc9a1a48685",
+      "rules": 50,
+      "matched_rows": 744,
+      "aspect_hits": {
+        "api_extensibility": 87,
+        "community": 2,
+        "compile_time": 50,
+        "diagnostics_debugging": 36,
+        "learning_curve": 32,
+        "libraries_frameworks": 104,
+        "ownership": 22,
+        "package_manager": 255,
+        "readability_maintainability": 42,
+        "runtime_performance": 65,
+        "safety": 18,
+        "tooling_documentation": 140,
+        "type_system": 94
+      },
+      "eligible_matched_rows": 707,
+      "eligible_aspect_hits": {
+        "api_extensibility": 84,
+        "community": 2,
+        "compile_time": 46,
+        "diagnostics_debugging": 32,
+        "learning_curve": 30,
+        "libraries_frameworks": 98,
+        "ownership": 22,
+        "package_manager": 235,
+        "readability_maintainability": 39,
+        "runtime_performance": 56,
+        "safety": 16,
+        "tooling_documentation": 134,
+        "type_system": 92
+      },
+      "elapsed_seconds": 7.105
+    }
+  },
+  "limitations": [
+    "Historical clean-v1 export; not a fresh random sample of the entire corpus.",
+    "Candidate hit counts are not precision, recall or annotation accuracy.",
+    "No remote database access or model calls."
+  ],
+  "input_size": {
+    "system_prompt_chars": 6380,
+    "eligible_model_input_chars_mean": 480.38,
+    "illustrative_batch_request_bytes_mean": 12205.75,
+    "illustrative_batch_request_bytes_max": 16022,
+    "note": "Illustrative envelope excludes output schema/options; actual upload must check bytes."
+  }
+}
