@@ -8,6 +8,7 @@ import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 import httpx
 
@@ -17,6 +18,7 @@ from storage import Storage
 from taxonomy import TAXONOMY_VERSION
 
 from .prompts import PROMPT_VERSION, SYSTEM_PROMPT
+from .usage import TokenUsage
 from .validation import AnnotationValidationError, validate_annotation
 
 logger = logging.getLogger(__name__)
@@ -97,6 +99,7 @@ class LLMClient:
         ):
             raise ValueError("LLM user_id 只能包含字母、数字、连字符和下划线")
         self.model = model
+        self.usage = TokenUsage()
         self.provider = provider
         self.reasoning_effort = reasoning_effort
         self.max_tokens = resolved_max_tokens
@@ -179,6 +182,7 @@ class LLMClient:
             await self._wait_for_cooldown()
             response: httpx.Response | None = None
             try:
+                self.usage.totals["http_attempts"] += 1
                 response = await self._client.post("/chat/completions", json=payload)
                 if response.status_code in FATAL_STATUS_CODES:
                     self._fatal_status = response.status_code
@@ -195,6 +199,8 @@ class LLMClient:
                     )
                 response.raise_for_status()
                 body = response.json()
+                # 在校验标注之前记账：截断、空响应和非法标签也可能已经产生用量。
+                self.usage.record(body.get("usage") if isinstance(body, dict) else None)
                 choice = body["choices"][0]
                 if choice.get("finish_reason") == "length":
                     raise ValueError("LLM 单条响应因达到长度上限而被截断")
@@ -269,6 +275,7 @@ class LLMLabeler:
         fetch_size: int = 200,
         write_batch_size: int = 50,
         max_consecutive_failures: int = 10,
+        usage_log_interval_seconds: float = 1800,
     ):
         if not 1 <= concurrency <= MAX_LLM_CONCURRENCY:
             raise ValueError(
@@ -282,6 +289,8 @@ class LLMLabeler:
             raise ValueError("缓存预热请求数不能小于 0")
         if max_consecutive_failures <= 0:
             raise ValueError("连续失败熔断阈值必须大于 0")
+        if usage_log_interval_seconds <= 0:
+            raise ValueError("用量日志间隔必须大于 0")
         self.client = client
         self.storage = storage
         self.concurrency = concurrency
@@ -289,6 +298,7 @@ class LLMLabeler:
         self.fetch_size = max(fetch_size, concurrency)
         self.write_batch_size = write_batch_size
         self.max_consecutive_failures = max_consecutive_failures
+        self.usage_log_interval_seconds = usage_log_interval_seconds
 
     async def _label_one(
         self,
@@ -369,6 +379,7 @@ class LLMLabeler:
         *,
         limit: int | None = None,
         sample_set_id: int | None = None,
+        run_id: str | None = None,
     ) -> dict[str, int]:
         if limit is not None and limit <= 0:
             raise ValueError("标注数量上限必须大于 0")
@@ -425,7 +436,8 @@ class LLMLabeler:
             stats["requests"] += 1
             stats[row["status"]] += 1
             for key, value in metrics.items():
-                stats[key] += value
+                if usage is None or key not in {"cache_hit_tokens", "cache_miss_tokens"}:
+                    stats[key] += value
             stats["max_in_flight"] = max(
                 stats["max_in_flight"], in_flight["maximum"]
             )
@@ -443,6 +455,46 @@ class LLMLabeler:
                 )
 
         active_tasks: list[asyncio.Task[tuple[dict[str, Any], dict[str, int]]]] = []
+        usage = getattr(self.client, "usage", None)
+        usage_baseline = usage.snapshot() if usage is not None else {}
+        log_run_id = run_id or uuid4().hex
+        started_at = asyncio.get_running_loop().time()
+
+        def log_usage(event: str, status: str) -> None:
+            if usage is not None:
+                stats.update({
+                    key: value - usage_baseline[key] for key, value in usage.snapshot().items()
+                })
+            elapsed = asyncio.get_running_loop().time() - started_at
+            logger.info("[LLM_USAGE] %s", json.dumps({
+                "event": event,
+                "status": status,
+                "run_id": log_run_id,
+                "model": self.client.model,
+                "sample_set_id": sample_set_id,
+                "prompt_version": PROMPT_VERSION,
+                "taxonomy_version": TAXONOMY_VERSION,
+                "elapsed_seconds": round(elapsed, 1),
+                "in_flight": in_flight["current"],
+                "completed": stats["requests"],
+                **stats,
+                "output_tokens": (
+                    stats.get("output_tokens") if stats.get("output_usage_responses") else None
+                ),
+                "reasoning_tokens": (
+                    stats.get("reasoning_tokens")
+                    if stats.get("reasoning_usage_responses") else None
+                ),
+            }, ensure_ascii=False, separators=(",", ":")))
+
+        async def periodic_usage() -> None:
+            while True:
+                await asyncio.sleep(self.usage_log_interval_seconds)
+                log_usage("progress", "running")
+
+        log_usage("start", "running")
+        monitor = asyncio.create_task(periodic_usage())
+        outcome = "completed"
         try:
             for batch in batches:
                 remaining = limit - stats["read"] if limit is not None else len(batch)
@@ -471,6 +523,7 @@ class LLMLabeler:
                     return stats
             return stats
         except (LLMFatalError, LabelingCircuitBreakerError):
+            outcome = "failed"
             for task in active_tasks:
                 task.cancel()
             if active_tasks:
@@ -478,15 +531,28 @@ class LLMLabeler:
             await flush_write_buffer()
             logger.critical("LLM 标注安全熔断，剩余请求已取消")
             raise
+        except BaseException as exc:
+            outcome = "cancelled" if isinstance(exc, asyncio.CancelledError) else "failed"
+            raise
+        finally:
+            for task in active_tasks:
+                if not task.done():
+                    task.cancel()
+            if active_tasks:
+                await asyncio.gather(*active_tasks, return_exceptions=True)
+            monitor.cancel()
+            await asyncio.gather(monitor, return_exceptions=True)
+            log_usage("final", outcome)
 
     def label_pending(
         self,
         *,
         limit: int | None = None,
         sample_set_id: int | None = None,
+        run_id: str | None = None,
     ) -> dict[str, int]:
         return asyncio.run(
-            self.label_pending_async(limit=limit, sample_set_id=sample_set_id)
+            self.label_pending_async(limit=limit, sample_set_id=sample_set_id, run_id=run_id)
         )
 
 

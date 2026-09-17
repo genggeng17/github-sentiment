@@ -158,6 +158,7 @@ class Pipeline:
         limit: int | None = None,
         sample_name: str | None = None,
         concurrency: int | None = None,
+        run_id: str | None = None,
     ) -> dict[str, int]:
         self.settings.require_labeling()
         logger.info(
@@ -202,7 +203,8 @@ class Pipeline:
                     max_consecutive_failures=(
                         self.settings.llm_max_consecutive_failures
                     ),
-                ).label_pending_async(limit=limit, sample_set_id=sample_set_id)
+                    usage_log_interval_seconds=self.settings.llm_usage_log_interval_seconds,
+                ).label_pending_async(limit=limit, sample_set_id=sample_set_id, run_id=run_id)
             finally:
                 await client.close()
 
@@ -241,11 +243,12 @@ class Pipeline:
             )
         if not skip_label:
             stats["llm_labeling"] = (
-                self.label(concurrency=label_concurrency)
+                self.label(concurrency=label_concurrency, run_id=run_id)
                 if sample_name is None
                 else self.label(
                     sample_name=sample_name,
                     concurrency=label_concurrency,
+                    run_id=run_id,
                 )
             )
         return stats
@@ -445,6 +448,7 @@ def main(argv: list[str] | None = None) -> int:
             limit=args.limit,
             sample_name=args.sample,
             concurrency=args.concurrency,
+            run_id=_run_id,
         ),
         "sample-lexicon": lambda _run_id: LexiconSampler(storage).build(
             args.name, lexicon_path=args.lexicon, quotas=parse_quotas(args.quota),

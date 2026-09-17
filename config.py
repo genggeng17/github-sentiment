@@ -67,6 +67,7 @@ class Settings:
     deepseek_model: str = "deepseek-v4-flash"
     deepseek_user_id: str = "rust-sentiment-labeler"
     llm_concurrency: int = 20
+    llm_usage_log_interval_seconds: int = 1800
     llm_cache_warmup_requests: int = 2
     llm_max_consecutive_failures: int = 10
     label_fetch_size: int = 200
@@ -122,6 +123,7 @@ class Settings:
             llm_concurrency=_bounded_positive_int(
                 "LLM_CONCURRENCY", 20, MAX_LLM_CONCURRENCY
             ),
+            llm_usage_log_interval_seconds=_positive_int("LLM_USAGE_LOG_INTERVAL_SECONDS", 1800),
             llm_cache_warmup_requests=_nonnegative_int(
                 "LLM_CACHE_WARMUP_REQUESTS", 2
             ),
