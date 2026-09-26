@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -54,6 +56,15 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.umap_neighbors < 2:
         raise ValueError("--umap-neighbors 必须至少为 2")
+    if args.action == "inspect":
+        topic_logger = logging.getLogger("topic_analysis")
+        if not any(handler.name == "topic_analysis_cli" for handler in topic_logger.handlers):
+            handler = logging.StreamHandler(sys.stderr)
+            handler.set_name("topic_analysis_cli")
+            handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+            topic_logger.addHandler(handler)
+        topic_logger.setLevel(logging.INFO)
+        topic_logger.propagate = False
     config = {
         "taxonomy_version": args.taxonomy_version,
         "prompt_version": args.prompt_version,

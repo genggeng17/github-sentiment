@@ -1,4 +1,5 @@
 import csv
+import logging
 import sys
 import types
 from datetime import datetime
@@ -115,7 +116,7 @@ def test_topic_reader_uses_latest_corpus_and_source_creation_time():
     engine.dispose()
 
 
-def test_inspect_streams_counts_without_source_metadata(tmp_path):
+def test_inspect_streams_counts_without_source_metadata(tmp_path, caplog):
     class FakeStorage:
         def iter_confirmed_topic_documents(self, **kwargs):
             assert kwargs["include_source_metadata"] is False
@@ -149,17 +150,18 @@ def test_inspect_streams_counts_without_source_metadata(tmp_path):
                 },
             ]
 
-    result = TopicAnalysis(FakeStorage(), tmp_path).inspect(
-        {
-            "taxonomy_version": TAXONOMY_VERSION,
-            "prompt_version": "prompt-test",
-            "model_name": "chosen",
-            "cleaning_version": "clean-v2",
-            "language": "en",
-            "max_chars": 4000,
-            "min_chars": 12,
-        }
-    )
+    with caplog.at_level(logging.INFO, logger="topic_analysis.service"):
+        result = TopicAnalysis(FakeStorage(), tmp_path).inspect(
+            {
+                "taxonomy_version": TAXONOMY_VERSION,
+                "prompt_version": "prompt-test",
+                "model_name": "chosen",
+                "cleaning_version": "clean-v2",
+                "language": "en",
+                "max_chars": 4000,
+                "min_chars": 12,
+            }
+        )
     assert result["selection"] == {
         "successful_rows": 4,
         "empty_aspect_rows": 1,
@@ -169,6 +171,10 @@ def test_inspect_streams_counts_without_source_metadata(tmp_path):
     }
     assert result["aspect_counts"]["package_manager"] == 2
     assert result["aspect_counts"]["tooling_documentation"] == 1
+    assert "inspect 开始" in caplog.text
+    assert "已读取 2 条" in caplog.text
+    assert "已读取 4 条" in caplog.text
+    assert "inspect 完成" in caplog.text
 
 
 def test_preparation_and_aspect_sampling_keep_sentiment_out_of_training_groups():

@@ -5,8 +5,10 @@ from __future__ import annotations
 import gc
 import hashlib
 import json
+import logging
 import os
 import re
+import time
 from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from importlib.metadata import version
@@ -24,6 +26,8 @@ from .data import (
     select_aspect_members,
 )
 from .reporting import build_rollups, write_csv
+
+logger = logging.getLogger(__name__)
 
 _RUN_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$")
 _DOMAIN_STOP_WORDS = {
@@ -127,6 +131,13 @@ class TopicAnalysis:
         )
 
     def inspect(self, config: dict[str, Any]) -> dict[str, Any]:
+        started_at = time.monotonic()
+        logger.info(
+            "inspect 开始：model=%s prompt=%s cleaning=%s；正在读取数据库",
+            config["model_name"],
+            config["prompt_version"],
+            config["cleaning_version"],
+        )
         counts: Counter[str] = Counter()
         stats: Counter[str] = Counter()
         seen_ids: set[int] = set()
@@ -154,7 +165,21 @@ class TopicAnalysis:
                     raise RuntimeError(f"重复读取 corpus_id={corpus_id}")
                 seen_ids.add(corpus_id)
                 counts.update(sentiments.keys())
+            logger.info(
+                "inspect 进度：已读取 %d 条，合格 %d 条，空方面 %d 条，过短 %d 条；耗时 %.1f 秒",
+                stats["successful_rows"],
+                len(seen_ids),
+                stats["empty_aspect_rows"],
+                stats["too_short_rows"],
+                time.monotonic() - started_at,
+            )
         stats["usable_rows"] = len(seen_ids)
+        logger.info(
+            "inspect 完成：已读取 %d 条，合格 %d 条；总耗时 %.1f 秒",
+            stats["successful_rows"],
+            stats["usable_rows"],
+            time.monotonic() - started_at,
+        )
         return {
             "source": {
                 key: config[key]
