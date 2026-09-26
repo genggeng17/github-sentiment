@@ -93,7 +93,82 @@ def test_topic_reader_uses_latest_corpus_and_source_creation_time():
     assert rows[0]["created_at"] == created
     assert rows[0]["github_url"].endswith("/102")
     assert rows[0]["annotations"]["annotations"][0]["class"] == "negative"
+    inspect_rows = [
+        item
+        for batch in storage.iter_confirmed_topic_documents(
+            taxonomy_version=TAXONOMY_VERSION,
+            prompt_version="prompt-test",
+            model_name="chosen",
+            cleaning_version="clean-v2",
+            batch_size=1,
+            include_source_metadata=False,
+        )
+        for item in batch
+    ]
+    assert inspect_rows == [
+        {
+            "corpus_id": current_id,
+            "clean_text": rows[0]["clean_text"],
+            "annotations": rows[0]["annotations"],
+        }
+    ]
     engine.dispose()
+
+
+def test_inspect_streams_counts_without_source_metadata(tmp_path):
+    class FakeStorage:
+        def iter_confirmed_topic_documents(self, **kwargs):
+            assert kwargs["include_source_metadata"] is False
+            yield [
+                {
+                    "corpus_id": 1,
+                    "clean_text": "Cargo workspace dependency resolution",
+                    "annotations": {
+                        "annotations": [{"aspect": "package_manager", "class": "negative"}]
+                    },
+                },
+                {"corpus_id": 2, "clean_text": "Ignore", "annotations": {"annotations": []}},
+            ]
+            yield [
+                {
+                    "corpus_id": 3,
+                    "clean_text": "Hi",
+                    "annotations": {
+                        "annotations": [{"aspect": "package_manager", "class": "positive"}]
+                    },
+                },
+                {
+                    "corpus_id": 4,
+                    "clean_text": "Cargo feature resolver and build documentation",
+                    "annotations": {
+                        "annotations": [
+                            {"aspect": "package_manager", "class": "neutral"},
+                            {"aspect": "tooling_documentation", "class": "positive"},
+                        ]
+                    },
+                },
+            ]
+
+    result = TopicAnalysis(FakeStorage(), tmp_path).inspect(
+        {
+            "taxonomy_version": TAXONOMY_VERSION,
+            "prompt_version": "prompt-test",
+            "model_name": "chosen",
+            "cleaning_version": "clean-v2",
+            "language": "en",
+            "max_chars": 4000,
+            "min_chars": 12,
+        }
+    )
+    assert result["selection"] == {
+        "successful_rows": 4,
+        "empty_aspect_rows": 1,
+        "too_short_rows": 1,
+        "truncated_rows": 0,
+        "usable_rows": 2,
+    }
+    assert result["aspect_counts"]["package_manager"] == 2
+    assert result["aspect_counts"]["tooling_documentation"] == 1
 
 
 def test_preparation_and_aspect_sampling_keep_sentiment_out_of_training_groups():

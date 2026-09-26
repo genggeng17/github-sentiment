@@ -19,6 +19,8 @@ from .data import (
     TOPIC_PREPROCESSING_VERSION,
     TopicDocument,
     load_documents,
+    parse_sentiments,
+    prepare_text,
     select_aspect_members,
 )
 from .reporting import build_rollups, write_csv
@@ -125,10 +127,34 @@ class TopicAnalysis:
         )
 
     def inspect(self, config: dict[str, Any]) -> dict[str, Any]:
-        documents, stats = self._load(config)
         counts: Counter[str] = Counter()
-        for document in documents.values():
-            counts.update(document.sentiments)
+        stats: Counter[str] = Counter()
+        seen_ids: set[int] = set()
+        for batch in self.storage.iter_confirmed_topic_documents(
+            taxonomy_version=config["taxonomy_version"],
+            prompt_version=config["prompt_version"],
+            model_name=config["model_name"],
+            cleaning_version=config["cleaning_version"],
+            language=config["language"],
+            include_source_metadata=False,
+        ):
+            for row in batch:
+                stats["successful_rows"] += 1
+                corpus_id = row["corpus_id"]
+                sentiments = parse_sentiments(row["annotations"], corpus_id)
+                if not sentiments:
+                    stats["empty_aspect_rows"] += 1
+                    continue
+                text, truncated = prepare_text(row["clean_text"], config["max_chars"])
+                if len(text) < config["min_chars"]:
+                    stats["too_short_rows"] += 1
+                    continue
+                stats["truncated_rows"] += int(truncated)
+                if corpus_id in seen_ids:
+                    raise RuntimeError(f"重复读取 corpus_id={corpus_id}")
+                seen_ids.add(corpus_id)
+                counts.update(sentiments.keys())
+        stats["usable_rows"] = len(seen_ids)
         return {
             "source": {
                 key: config[key]
@@ -140,7 +166,7 @@ class TopicAnalysis:
                     "language",
                 )
             },
-            "selection": stats,
+            "selection": dict(stats),
             "aspect_counts": {aspect: counts[aspect] for aspect in sorted(ASPECTS)},
         }
 

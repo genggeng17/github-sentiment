@@ -1047,8 +1047,9 @@ class Storage:
         cleaning_version: str,
         language: str = "en",
         batch_size: int = 1000,
+        include_source_metadata: bool = True,
     ) -> Iterator[list[dict[str, Any]]]:
-        """Yield current, nonduplicate, successfully labeled corpus with source metadata."""
+        """Yield current labeled corpus, optionally including source metadata."""
         from sqlalchemy.orm import aliased
 
         source_models = {
@@ -1059,27 +1060,30 @@ class Storage:
             "pr_review_comment": PullRequestComment,
         }
         newer = aliased(Corpus)
-        with self.sessions() as session:
-            repositories = {
-                repository_id: full_name
-                for repository_id, full_name in session.execute(
-                    select(Repository.id, Repository.full_name)
-                )
-            }
+        repositories = {}
+        if include_source_metadata:
+            with self.sessions() as session:
+                repositories = {
+                    repository_id: full_name
+                    for repository_id, full_name in session.execute(
+                        select(Repository.id, Repository.full_name)
+                    )
+                }
+        columns = [
+            LlmAnnotation.id.label("annotation_id"),
+            Corpus.id.label("corpus_id"),
+            Corpus.clean_text,
+            LlmAnnotation.parsed_result,
+        ]
+        if include_source_metadata:
+            columns.extend(
+                [Corpus.source_type, Corpus.source_id, Corpus.parent_id, Corpus.content_hash]
+            )
         last_annotation_id = 0
         while True:
             with self.sessions() as session:
                 records = session.execute(
-                    select(
-                        LlmAnnotation.id.label("annotation_id"),
-                        Corpus.id.label("corpus_id"),
-                        Corpus.source_type,
-                        Corpus.source_id,
-                        Corpus.parent_id,
-                        Corpus.content_hash,
-                        Corpus.clean_text,
-                        LlmAnnotation.parsed_result,
-                    )
+                    select(*columns)
                     .join(Corpus, Corpus.id == LlmAnnotation.corpus_id)
                     .where(
                         LlmAnnotation.id > last_annotation_id,
@@ -1105,27 +1109,38 @@ class Storage:
                 if not records:
                     break
                 last_annotation_id = records[-1]["annotation_id"]
-                source_metadata: dict[tuple[str, int], tuple[int, datetime, str]] = {}
-                for source_type, model in source_models.items():
-                    ids = [
-                        row["source_id"]
-                        for row in records
-                        if row["source_type"] == source_type
-                    ]
-                    if not ids:
-                        continue
-                    for source_id, repository_id, created_at, github_url in session.execute(
-                        select(
-                            model.id, model.repository_id, model.created_at, model.github_url
-                        ).where(
-                            model.id.in_(ids)
-                        )
-                    ):
-                        source_metadata[(source_type, source_id)] = (
-                            repository_id,
-                            created_at,
-                            github_url,
-                        )
+                if include_source_metadata:
+                    source_metadata: dict[tuple[str, int], tuple[int, datetime, str]] = {}
+                    for source_type, model in source_models.items():
+                        ids = [
+                            row["source_id"]
+                            for row in records
+                            if row["source_type"] == source_type
+                        ]
+                        if not ids:
+                            continue
+                        for source_id, repository_id, created_at, github_url in session.execute(
+                            select(
+                                model.id, model.repository_id, model.created_at, model.github_url
+                            ).where(
+                                model.id.in_(ids)
+                            )
+                        ):
+                            source_metadata[(source_type, source_id)] = (
+                                repository_id,
+                                created_at,
+                                github_url,
+                            )
+            if not include_source_metadata:
+                yield [
+                    {
+                        "corpus_id": row["corpus_id"],
+                        "clean_text": row["clean_text"],
+                        "annotations": row["parsed_result"],
+                    }
+                    for row in records
+                ]
+                continue
             batch = []
             for row in records:
                 key = (row["source_type"], row["source_id"])
