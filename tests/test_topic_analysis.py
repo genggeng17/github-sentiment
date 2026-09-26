@@ -255,7 +255,7 @@ def test_rollups_use_aspect_month_and_repository_denominators():
     assert repo["share_within_aspect_repository"] == 0.5
 
 
-def test_fit_writes_reviewable_snapshot_without_sentiment_split(tmp_path, monkeypatch):
+def test_fit_writes_reviewable_snapshot_without_sentiment_split(tmp_path, monkeypatch, caplog):
     class FakeStorage:
         def iter_confirmed_topic_documents(self, **_kwargs):
             yield [
@@ -355,9 +355,10 @@ def test_fit_writes_reviewable_snapshot_without_sentiment_split(tmp_path, monkey
         "umap_neighbors": 2,
         "seed": 42,
     }
-    result = TopicAnalysis(FakeStorage(), tmp_path).fit(
-        config, output_root=tmp_path / "data/topics", run_name="pilot"
-    )
+    with caplog.at_level(logging.INFO, logger="topic_analysis"):
+        result = TopicAnalysis(FakeStorage(), tmp_path).fit(
+            config, output_root=tmp_path / "data/topics", run_name="pilot"
+        )
     output = tmp_path / "data/topics/pilot"
     assert result["aspect_stats"]["package_manager"]["outlier_count"] == 1
     with (output / "assignments.csv").open(encoding="utf-8-sig", newline="") as handle:
@@ -366,3 +367,7 @@ def test_fit_writes_reviewable_snapshot_without_sentiment_split(tmp_path, monkey
     assert {row["sentiment"] for row in assignments} == {"positive", "negative"}
     assert (output / "review.csv").exists()
     assert (output / "models/package_manager.pkl").exists()
+    assert "fit 开始" in caplog.text
+    assert "语料读取进度" in caplog.text
+    assert "fit 开始训练方面 package_manager" in caplog.text
+    assert "fit 完成：结果保存到" in caplog.text

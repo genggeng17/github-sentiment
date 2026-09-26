@@ -210,7 +210,21 @@ class TopicAnalysis:
         if destination.exists() or staging.exists():
             raise ValueError(f"输出目录已存在: {destination} 或 {staging}")
 
+        started_at = time.monotonic()
+        logger.info(
+            "fit 开始：name=%s model=%s cleaning=%s aspects=%s",
+            run_name,
+            config["model_name"],
+            config["cleaning_version"],
+            ",".join(config["aspects"]),
+        )
         documents, stats = self._load(config)
+        logger.info(
+            "fit 语料读取完成：已读取 %d 条，保留 %d 条；耗时 %.1f 秒",
+            stats.get("successful_rows", 0),
+            len(documents),
+            time.monotonic() - started_at,
+        )
         members = select_aspect_members(
             documents,
             aspects=tuple(config["aspects"]),
@@ -226,7 +240,14 @@ class TopicAnalysis:
         eligible = {aspect: ids for aspect, ids in members.items() if aspect not in skipped}
         if not eligible:
             raise ValueError("没有达到最小语料量的方面；先用 inspect 核对标注版本和数量")
+        logger.info(
+            "fit 选样完成：可训练 %d 个方面，跳过 %d 个方面；选中 %d 条方面语料",
+            len(eligible),
+            len(skipped),
+            sum(len(ids) for ids in eligible.values()),
+        )
 
+        logger.info("fit 正在加载 BERTopic 依赖")
         try:
             import numpy as np
             import torch
@@ -255,8 +276,15 @@ class TopicAnalysis:
                 )
                 input_digest.update(material.encode())
         index = {corpus_id: offset for offset, corpus_id in enumerate(unique_ids)}
+        logger.info(
+            "fit 正在加载嵌入模型：%s（CPU）；待编码 %d 条不重复语料",
+            config["embedding_model"],
+            len(unique_ids),
+        )
         embedder = SentenceTransformer(config["embedding_model"], device="cpu")
         embedder.save(str(staging / "encoder"))
+        embedding_started_at = time.monotonic()
+        logger.info("fit 开始计算文本向量：batch_size=%d", config["embedding_batch_size"])
         embeddings = embedder.encode(
             [documents[corpus_id].text for corpus_id in unique_ids],
             batch_size=config["embedding_batch_size"],
@@ -264,6 +292,12 @@ class TopicAnalysis:
             convert_to_numpy=True,
             normalize_embeddings=True,
         )
+        logger.info(
+            "fit 文本向量计算完成：%d 条；耗时 %.1f 秒",
+            len(unique_ids),
+            time.monotonic() - embedding_started_at,
+        )
+        logger.info("fit 正在保存文本向量")
         np.save(staging / "embeddings.npy", embeddings)
         _write_json(staging / "embedding_corpus_ids.json", {"corpus_ids": unique_ids})
 
@@ -274,8 +308,11 @@ class TopicAnalysis:
         for aspect in config["aspects"]:
             if aspect in skipped:
                 aspect_stats[aspect] = {"status": "insufficient", "documents": skipped[aspect]}
+                logger.info("fit 跳过方面 %s：仅 %d 条语料", aspect, skipped[aspect])
                 continue
             ids = eligible[aspect]
+            aspect_started_at = time.monotonic()
+            logger.info("fit 开始训练方面 %s：%d 条语料", aspect, len(ids))
             texts = [documents[corpus_id].text for corpus_id in ids]
             aspect_embeddings = embeddings[[index[corpus_id] for corpus_id in ids]]
             vectorizer = CountVectorizer(
@@ -360,7 +397,15 @@ class TopicAnalysis:
             )
             del model, reducer, clusterer, vectorizer, aspect_embeddings
             gc.collect()
+            logger.info(
+                "fit 完成方面 %s：%d 个话题，%d 条离群；耗时 %.1f 秒",
+                aspect,
+                aspect_stats[aspect]["topics_excluding_outliers"],
+                aspect_stats[aspect]["outlier_count"],
+                time.monotonic() - aspect_started_at,
+            )
 
+        logger.info("fit 正在汇总情感、月份和仓库统计并写出结果")
         rollups = build_rollups(assignments)
         details_by_key = {
             (aspect, item["topic_id"]): item
@@ -505,6 +550,11 @@ class TopicAnalysis:
         }
         _write_json(staging / "manifest.json", manifest)
         os.replace(staging, destination)
+        logger.info(
+            "fit 完成：结果保存到 %s；总耗时 %.1f 秒",
+            destination,
+            time.monotonic() - started_at,
+        )
         return {
             "output_dir": str(destination),
             "selected_unique_documents": len(unique_ids),

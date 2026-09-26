@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -11,6 +12,8 @@ from typing import Any
 
 from corpus.cleaning import clean_text
 from taxonomy import ASPECTS, CLASSES
+
+logger = logging.getLogger(__name__)
 
 TOPIC_PREPROCESSING_VERSION = "topic-text-v1"
 
@@ -133,5 +136,12 @@ def load_documents(
                 text=text,
                 sentiments=sentiments,
             )
+        logger.info(
+            "语料读取进度：已读取 %d 条，保留 %d 条，空方面 %d 条，过短 %d 条",
+            stats["successful_rows"],
+            len(documents),
+            stats["empty_aspect_rows"],
+            stats["too_short_rows"],
+        )
     stats["usable_rows"] = len(documents)
     return documents, dict(stats)
