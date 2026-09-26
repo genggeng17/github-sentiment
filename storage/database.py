@@ -1038,6 +1038,118 @@ class Storage:
             ["raw_response", "parsed_result", "status", "error_message", "updated_at"],
         )
 
+    def iter_confirmed_topic_documents(
+        self,
+        *,
+        taxonomy_version: str,
+        prompt_version: str,
+        model_name: str,
+        cleaning_version: str,
+        language: str = "en",
+        batch_size: int = 1000,
+    ) -> Iterator[list[dict[str, Any]]]:
+        """Yield current, nonduplicate, successfully labeled corpus with source metadata."""
+        from sqlalchemy.orm import aliased
+
+        source_models = {
+            "issue": Issue,
+            "pull_request": PullRequest,
+            "issue_comment": IssueComment,
+            "pr_issue_comment": PullRequestComment,
+            "pr_review_comment": PullRequestComment,
+        }
+        newer = aliased(Corpus)
+        with self.sessions() as session:
+            repositories = {
+                repository_id: full_name
+                for repository_id, full_name in session.execute(
+                    select(Repository.id, Repository.full_name)
+                )
+            }
+        last_annotation_id = 0
+        while True:
+            with self.sessions() as session:
+                records = session.execute(
+                    select(
+                        LlmAnnotation.id.label("annotation_id"),
+                        Corpus.id.label("corpus_id"),
+                        Corpus.source_type,
+                        Corpus.source_id,
+                        Corpus.parent_id,
+                        Corpus.content_hash,
+                        Corpus.clean_text,
+                        LlmAnnotation.parsed_result,
+                    )
+                    .join(Corpus, Corpus.id == LlmAnnotation.corpus_id)
+                    .where(
+                        LlmAnnotation.id > last_annotation_id,
+                        LlmAnnotation.taxonomy_version == taxonomy_version,
+                        LlmAnnotation.prompt_version == prompt_version,
+                        LlmAnnotation.model_name == model_name,
+                        LlmAnnotation.status == "succeeded",
+                        Corpus.cleaning_version == cleaning_version,
+                        Corpus.language == language,
+                        Corpus.duplicate_of_id.is_(None),
+                        ~select(newer.id)
+                        .where(
+                            newer.source_type == Corpus.source_type,
+                            newer.source_id == Corpus.source_id,
+                            newer.cleaning_version == Corpus.cleaning_version,
+                            newer.id > Corpus.id,
+                        )
+                        .exists(),
+                    )
+                    .order_by(LlmAnnotation.id)
+                    .limit(batch_size)
+                ).mappings().all()
+                if not records:
+                    break
+                last_annotation_id = records[-1]["annotation_id"]
+                source_metadata: dict[tuple[str, int], tuple[int, datetime, str]] = {}
+                for source_type, model in source_models.items():
+                    ids = [
+                        row["source_id"]
+                        for row in records
+                        if row["source_type"] == source_type
+                    ]
+                    if not ids:
+                        continue
+                    for source_id, repository_id, created_at, github_url in session.execute(
+                        select(
+                            model.id, model.repository_id, model.created_at, model.github_url
+                        ).where(
+                            model.id.in_(ids)
+                        )
+                    ):
+                        source_metadata[(source_type, source_id)] = (
+                            repository_id,
+                            created_at,
+                            github_url,
+                        )
+            batch = []
+            for row in records:
+                key = (row["source_type"], row["source_id"])
+                if key not in source_metadata:
+                    raise RuntimeError(f"topic 语料来源缺失: {key}")
+                repository_id, created_at, github_url = source_metadata[key]
+                if repository_id not in repositories:
+                    raise RuntimeError(f"topic 仓库元数据缺失: {repository_id}")
+                batch.append(
+                    {
+                        "corpus_id": row["corpus_id"],
+                        "source_type": row["source_type"],
+                        "source_id": row["source_id"],
+                        "parent_id": row["parent_id"],
+                        "content_hash": row["content_hash"],
+                        "clean_text": row["clean_text"],
+                        "annotations": row["parsed_result"],
+                        "repository": repositories[repository_id],
+                        "created_at": created_at,
+                        "github_url": github_url,
+                    }
+                )
+            yield batch
+
     def start_pipeline_run(self, run_type: str) -> str:
         run = PipelineRun(run_type=run_type, status=RunStatus.RUNNING.value)
         with self.sessions.begin() as session:

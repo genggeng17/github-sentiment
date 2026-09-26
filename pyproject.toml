@@ -21,11 +21,15 @@ dev = [
   "pytest-cov>=5,<7",
   "ruff>=0.6,<1",
 ]
+topics = [
+  "bertopic>=0.16,<1",
+  "sentence-transformers>=3,<6",
+]
 
 [tool.setuptools]
 include-package-data = false
 py-modules = ["config", "pipeline", "taxonomy"]
-packages = ["corpus", "crawler", "lexicon", "llm_labeler", "bert_labeler", "storage"]
+packages = ["corpus", "crawler", "lexicon", "llm_labeler", "bert_labeler", "storage", "topic_analysis"]
 
 [tool.setuptools.package-data]
 lexicon = ["rules/*.json"]
