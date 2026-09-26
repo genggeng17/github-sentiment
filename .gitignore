@@ -13,3 +13,4 @@ build/
 .idea/
 .vscode/
 data/topics/
+data/models/
