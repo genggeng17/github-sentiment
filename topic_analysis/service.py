@@ -19,11 +19,11 @@ from taxonomy import ASPECTS
 
 from .data import (
     TOPIC_PREPROCESSING_VERSION,
+    TOPIC_SNAPSHOT_VERSION,
     TopicDocument,
-    load_documents,
+    load_snapshot_documents,
     parse_sentiments,
     prepare_text,
-    select_aspect_members,
 )
 from .reporting import build_rollups, write_csv
 
@@ -118,19 +118,18 @@ class TopicAnalysis:
         self.storage = storage
         self.repo_root = repo_root.resolve()
 
-    def _load(self, config: dict[str, Any]) -> tuple[dict[int, TopicDocument], dict[str, Any]]:
-        return load_documents(
-            self.storage,
-            taxonomy_version=config["taxonomy_version"],
-            prompt_version=config["prompt_version"],
-            model_name=config["model_name"],
-            cleaning_version=config["cleaning_version"],
-            language=config["language"],
-            max_chars=config["max_chars"],
-            min_chars=config["min_chars"],
-        )
-
-    def inspect(self, config: dict[str, Any]) -> dict[str, Any]:
+    def inspect(
+        self, config: dict[str, Any], *, output_root: Path, snapshot_name: str
+    ) -> dict[str, Any]:
+        if not _RUN_NAME.fullmatch(snapshot_name):
+            raise ValueError("快照名称只能含字母、数字、下划线和连字符，长度不超过 80")
+        root = _safe_output_root(self.repo_root, output_root) / "snapshots"
+        destination = root / snapshot_name
+        staging = root / f"{snapshot_name}.building"
+        if destination.exists() or staging.exists():
+            raise ValueError(f"快照目录已存在: {destination} 或 {staging}")
+        root.mkdir(parents=True, exist_ok=True)
+        staging.mkdir()
         started_at = time.monotonic()
         logger.info(
             "inspect 开始：model=%s prompt=%s cleaning=%s；正在读取数据库",
@@ -141,38 +140,58 @@ class TopicAnalysis:
         counts: Counter[str] = Counter()
         stats: Counter[str] = Counter()
         seen_ids: set[int] = set()
-        for batch in self.storage.iter_confirmed_topic_documents(
-            taxonomy_version=config["taxonomy_version"],
-            prompt_version=config["prompt_version"],
-            model_name=config["model_name"],
-            cleaning_version=config["cleaning_version"],
-            language=config["language"],
-            include_source_metadata=False,
-        ):
-            for row in batch:
-                stats["successful_rows"] += 1
-                corpus_id = row["corpus_id"]
-                sentiments = parse_sentiments(row["annotations"], corpus_id)
-                if not sentiments:
-                    stats["empty_aspect_rows"] += 1
-                    continue
-                text, truncated = prepare_text(row["clean_text"], config["max_chars"])
-                if len(text) < config["min_chars"]:
-                    stats["too_short_rows"] += 1
-                    continue
-                stats["truncated_rows"] += int(truncated)
-                if corpus_id in seen_ids:
-                    raise RuntimeError(f"重复读取 corpus_id={corpus_id}")
-                seen_ids.add(corpus_id)
-                counts.update(sentiments.keys())
-            logger.info(
-                "inspect 进度：已读取 %d 条，合格 %d 条，空方面 %d 条，过短 %d 条；耗时 %.1f 秒",
-                stats["successful_rows"],
-                len(seen_ids),
-                stats["empty_aspect_rows"],
-                stats["too_short_rows"],
-                time.monotonic() - started_at,
-            )
+        digest = hashlib.sha256()
+        with (staging / "documents.jsonl").open("wb") as handle:
+            for batch in self.storage.iter_confirmed_topic_documents(
+                taxonomy_version=config["taxonomy_version"],
+                prompt_version=config["prompt_version"],
+                model_name=config["model_name"],
+                cleaning_version=config["cleaning_version"],
+                language=config["language"],
+                include_source_metadata=True,
+            ):
+                for row in batch:
+                    stats["successful_rows"] += 1
+                    corpus_id = row["corpus_id"]
+                    sentiments = parse_sentiments(row["annotations"], corpus_id)
+                    if not sentiments:
+                        stats["empty_aspect_rows"] += 1
+                        continue
+                    text, truncated = prepare_text(row["clean_text"], config["max_chars"])
+                    if len(text) < config["min_chars"]:
+                        stats["too_short_rows"] += 1
+                        continue
+                    stats["truncated_rows"] += int(truncated)
+                    if corpus_id in seen_ids:
+                        raise RuntimeError(f"重复读取 corpus_id={corpus_id}")
+                    seen_ids.add(corpus_id)
+                    counts.update(sentiments.keys())
+                    document = {
+                        "corpus_id": corpus_id,
+                        "source_type": row["source_type"],
+                        "source_id": row["source_id"],
+                        "parent_id": row["parent_id"],
+                        "content_hash": row["content_hash"],
+                        "repository": row["repository"],
+                        "created_at": row["created_at"].isoformat(),
+                        "github_url": row["github_url"],
+                        "text": text,
+                        "sentiments": sentiments,
+                    }
+                    line = (
+                        json.dumps(document, ensure_ascii=False, separators=(",", ":")) + "\n"
+                    ).encode("utf-8")
+                    handle.write(line)
+                    digest.update(line)
+                logger.info(
+                    "inspect 进度：已读取 %d 条，合格 %d 条，空方面 %d 条，"
+                    "过短 %d 条；耗时 %.1f 秒",
+                    stats["successful_rows"],
+                    len(seen_ids),
+                    stats["empty_aspect_rows"],
+                    stats["too_short_rows"],
+                    time.monotonic() - started_at,
+                )
         stats["usable_rows"] = len(seen_ids)
         logger.info(
             "inspect 完成：已读取 %d 条，合格 %d 条；总耗时 %.1f 秒",
@@ -180,7 +199,7 @@ class TopicAnalysis:
             stats["usable_rows"],
             time.monotonic() - started_at,
         )
-        return {
+        result = {
             "source": {
                 key: config[key]
                 for key in (
@@ -189,11 +208,27 @@ class TopicAnalysis:
                     "model_name",
                     "cleaning_version",
                     "language",
+                    "max_chars",
+                    "min_chars",
                 )
             },
             "selection": dict(stats),
             "aspect_counts": {aspect: counts[aspect] for aspect in sorted(ASPECTS)},
         }
+        _write_json(
+            staging / "manifest.json",
+            {
+                **result,
+                "snapshot_name": snapshot_name,
+                "created_at_utc": datetime.now(UTC).isoformat(),
+                "topic_preprocessing_version": TOPIC_PREPROCESSING_VERSION,
+                "snapshot_format_version": TOPIC_SNAPSHOT_VERSION,
+                "documents_sha256": digest.hexdigest(),
+            },
+        )
+        os.replace(staging, destination)
+        logger.info("inspect 快照保存到 %s", destination)
+        return {**result, "snapshot_dir": str(destination), "snapshot_name": snapshot_name}
 
     def fit(
         self,
@@ -201,10 +236,16 @@ class TopicAnalysis:
         *,
         output_root: Path,
         run_name: str,
+        snapshot_name: str,
     ) -> dict[str, Any]:
         if not _RUN_NAME.fullmatch(run_name):
             raise ValueError("运行名称只能含字母、数字、下划线和连字符，长度不超过 80")
+        if not _RUN_NAME.fullmatch(snapshot_name):
+            raise ValueError("快照名称只能含字母、数字、下划线和连字符，长度不超过 80")
         root = _safe_output_root(self.repo_root, output_root)
+        snapshot_dir = root / "snapshots" / snapshot_name
+        if not snapshot_dir.is_dir():
+            raise ValueError(f"找不到已完成的语料快照: {snapshot_dir}")
         destination = root / run_name
         staging = root / f"{run_name}.building"
         if destination.exists() or staging.exists():
@@ -218,18 +259,14 @@ class TopicAnalysis:
             config["cleaning_version"],
             ",".join(config["aspects"]),
         )
-        documents, stats = self._load(config)
+        documents, members, stats, snapshot_manifest = load_snapshot_documents(
+            snapshot_dir, config=config
+        )
         logger.info(
-            "fit 语料读取完成：已读取 %d 条，保留 %d 条；耗时 %.1f 秒",
-            stats.get("successful_rows", 0),
+            "fit 快照选样完成：快照合格 %d 条，内存保留 %d 条；耗时 %.1f 秒",
+            stats.get("usable_rows", 0),
             len(documents),
             time.monotonic() - started_at,
-        )
-        members = select_aspect_members(
-            documents,
-            aspects=tuple(config["aspects"]),
-            max_per_aspect=config["max_docs_per_aspect"],
-            seed=config["seed"],
         )
         skipped = {
             aspect: len(members.get(aspect, []))
@@ -526,6 +563,8 @@ class TopicAnalysis:
         )
         manifest = {
             "run_name": run_name,
+            "snapshot_name": snapshot_name,
+            "snapshot_documents_sha256": snapshot_manifest["documents_sha256"],
             "created_at_utc": datetime.now(UTC).isoformat(),
             "config": config,
             "topic_preprocessing_version": TOPIC_PREPROCESSING_VERSION,

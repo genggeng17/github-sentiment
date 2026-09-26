@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import heapq
+import json
 import logging
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from corpus.cleaning import clean_text
@@ -16,6 +19,7 @@ from taxonomy import ASPECTS, CLASSES
 logger = logging.getLogger(__name__)
 
 TOPIC_PREPROCESSING_VERSION = "topic-text-v1"
+TOPIC_SNAPSHOT_VERSION = "topic-snapshot-v1"
 
 _URL = re.compile(r"https?://\S+", re.IGNORECASE)
 _REMOVED = re.compile(
@@ -90,58 +94,103 @@ def select_aspect_members(
     return dict(members)
 
 
-def load_documents(
-    storage: Any,
+def load_snapshot_documents(
+    snapshot_dir: Path,
     *,
-    taxonomy_version: str,
-    prompt_version: str,
-    model_name: str,
-    cleaning_version: str,
-    language: str,
-    max_chars: int,
-    min_chars: int,
-) -> tuple[dict[int, TopicDocument], dict[str, Any]]:
-    documents: dict[int, TopicDocument] = {}
-    stats: Counter[str] = Counter()
-    for batch in storage.iter_confirmed_topic_documents(
-        taxonomy_version=taxonomy_version,
-        prompt_version=prompt_version,
-        model_name=model_name,
-        cleaning_version=cleaning_version,
-        language=language,
-    ):
-        for row in batch:
-            stats["successful_rows"] += 1
-            sentiments = parse_sentiments(row["annotations"], row["corpus_id"])
-            if not sentiments:
-                stats["empty_aspect_rows"] += 1
-                continue
-            text, truncated = prepare_text(row["clean_text"], max_chars)
-            if len(text) < min_chars:
-                stats["too_short_rows"] += 1
-                continue
-            stats["truncated_rows"] += int(truncated)
-            corpus_id = row["corpus_id"]
-            if corpus_id in documents:
-                raise RuntimeError(f"重复读取 corpus_id={corpus_id}")
-            documents[corpus_id] = TopicDocument(
-                corpus_id=corpus_id,
-                source_type=row["source_type"],
-                source_id=row["source_id"],
-                parent_id=row["parent_id"],
-                content_hash=row["content_hash"],
-                repository=row["repository"],
-                created_at=row["created_at"],
-                github_url=row["github_url"],
-                text=text,
-                sentiments=sentiments,
-            )
-        logger.info(
-            "语料读取进度：已读取 %d 条，保留 %d 条，空方面 %d 条，过短 %d 条",
-            stats["successful_rows"],
-            len(documents),
-            stats["empty_aspect_rows"],
-            stats["too_short_rows"],
+    config: dict[str, Any],
+) -> tuple[dict[int, TopicDocument], dict[str, list[int]], dict[str, Any], dict[str, Any]]:
+    manifest_path = snapshot_dir / "manifest.json"
+    corpus_path = snapshot_dir / "documents.jsonl"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    expected = {
+        key: config[key]
+        for key in (
+            "taxonomy_version",
+            "prompt_version",
+            "model_name",
+            "cleaning_version",
+            "language",
+            "max_chars",
+            "min_chars",
         )
-    stats["usable_rows"] = len(documents)
-    return documents, dict(stats)
+    }
+    if (
+        manifest.get("source") != expected
+        or manifest.get("topic_preprocessing_version") != TOPIC_PREPROCESSING_VERSION
+        or manifest.get("snapshot_format_version") != TOPIC_SNAPSHOT_VERSION
+    ):
+        raise ValueError("快照的数据版本或清洗参数与 fit 命令不一致")
+
+    documents: dict[int, TopicDocument] = {}
+    aspects = tuple(config["aspects"])
+    limit = config["max_docs_per_aspect"]
+    heaps: dict[str, list[tuple[int, int, int]]] = {aspect: [] for aspect in aspects}
+    members: dict[str, list[int]] = {aspect: [] for aspect in aspects}
+    retained: Counter[int] = Counter()
+    seen_ids: set[int] = set()
+    digest = hashlib.sha256()
+    total = 0
+    with corpus_path.open("rb") as handle:
+        for line in handle:
+            digest.update(line)
+            row = json.loads(line)
+            corpus_id = row["corpus_id"]
+            if corpus_id in seen_ids:
+                raise ValueError(f"快照含重复 corpus_id={corpus_id}")
+            seen_ids.add(corpus_id)
+            total += 1
+            chosen = []
+            for aspect in aspects:
+                if aspect not in row["sentiments"]:
+                    continue
+                if limit is None:
+                    members[aspect].append(corpus_id)
+                    chosen.append(aspect)
+                    continue
+                rank = int.from_bytes(
+                    hashlib.sha256(
+                        f"{config['seed']}:{aspect}:{corpus_id}".encode("ascii")
+                    ).digest(),
+                    "big",
+                )
+                heap = heaps[aspect]
+                candidate = (-rank, -corpus_id, corpus_id)
+                if len(heap) < limit:
+                    heapq.heappush(heap, candidate)
+                elif candidate > heap[0]:
+                    evicted = heapq.heapreplace(heap, candidate)[2]
+                    retained[evicted] -= 1
+                    if retained[evicted] == 0:
+                        del retained[evicted]
+                        documents.pop(evicted)
+                else:
+                    continue
+                chosen.append(aspect)
+            if chosen:
+                document = TopicDocument(
+                    corpus_id=corpus_id,
+                    source_type=row["source_type"],
+                    source_id=row["source_id"],
+                    parent_id=row["parent_id"],
+                    content_hash=row["content_hash"],
+                    repository=row["repository"],
+                    created_at=datetime.fromisoformat(row["created_at"]),
+                    github_url=row["github_url"],
+                    text=row["text"],
+                    sentiments=row["sentiments"],
+                )
+                documents[corpus_id] = document
+                retained[corpus_id] += len(chosen)
+            if total % 1000 == 0:
+                logger.info("fit 快照读取进度：扫描 %d 条，内存保留 %d 条", total, len(documents))
+    if digest.hexdigest() != manifest.get("documents_sha256") or total != manifest.get(
+        "selection", {}
+    ).get("usable_rows"):
+        raise ValueError("快照文件损坏或不完整")
+    if limit is not None:
+        members = {aspect: sorted(item[2] for item in heaps[aspect]) for aspect in aspects}
+    else:
+        for ids in members.values():
+            ids.sort()
+    logger.info("fit 快照读取完成：扫描 %d 条，选中 %d 条不重复语料", total, len(documents))
+    return documents, members, manifest["selection"], manifest

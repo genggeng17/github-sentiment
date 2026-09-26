@@ -48,12 +48,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--umap-neighbors", type=positive_int, default=15)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output-root", type=Path, default=Path("data/topics"))
-    parser.add_argument("--name", help="fit 运行名；默认使用 UTC 时间戳")
+    parser.add_argument("--name", help="inspect 快照名或 fit 运行名；默认使用 UTC 时间戳")
+    parser.add_argument("--snapshot", help="fit 要读取的 inspect 快照名")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.action == "fit" and not args.snapshot:
+        parser.error("fit 必须指定 --snapshot，即 inspect 输出的 snapshot_name")
+    if args.action == "inspect" and args.snapshot:
+        parser.error("--snapshot 只用于 fit")
     if args.umap_neighbors < 2:
         raise ValueError("--umap-neighbors 必须至少为 2")
     topic_logger = logging.getLogger("topic_analysis")
@@ -84,14 +90,22 @@ def main(argv: list[str] | None = None) -> int:
         "seed": args.seed,
     }
     repo_root = Path(__file__).resolve().parents[1]
-    storage = Storage(Settings.from_env().database_url)
-    analysis = TopicAnalysis(storage, repo_root)
-    with storage.pipeline_lock():
-        if args.action == "inspect":
-            result = analysis.inspect(config)
-        else:
-            run_name = args.name or datetime.now(UTC).strftime("bertopic-%Y%m%dT%H%M%SZ")
-            result = analysis.fit(config, output_root=args.output_root, run_name=run_name)
+    if args.action == "inspect":
+        storage = Storage(Settings.from_env().database_url)
+        analysis = TopicAnalysis(storage, repo_root)
+        snapshot_name = args.name or datetime.now(UTC).strftime("corpus-%Y%m%dT%H%M%SZ")
+        with storage.pipeline_lock():
+            result = analysis.inspect(
+                config, output_root=args.output_root, snapshot_name=snapshot_name
+            )
+    else:
+        run_name = args.name or datetime.now(UTC).strftime("bertopic-%Y%m%dT%H%M%SZ")
+        result = TopicAnalysis(None, repo_root).fit(
+            config,
+            output_root=args.output_root,
+            run_name=run_name,
+            snapshot_name=args.snapshot,
+        )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 

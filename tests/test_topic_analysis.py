@@ -5,13 +5,20 @@ import types
 from datetime import datetime
 
 import numpy as np
+import pytest
 from sqlalchemy import create_engine, select
 
 from corpus.builder import make_corpus_row
 from storage import Storage
 from storage.models import Issue
 from taxonomy import TAXONOMY_VERSION
-from topic_analysis.data import TopicDocument, parse_sentiments, prepare_text, select_aspect_members
+from topic_analysis.data import (
+    TopicDocument,
+    load_snapshot_documents,
+    parse_sentiments,
+    prepare_text,
+    select_aspect_members,
+)
 from topic_analysis.reporting import build_rollups
 from topic_analysis.service import TopicAnalysis
 
@@ -116,38 +123,43 @@ def test_topic_reader_uses_latest_corpus_and_source_creation_time():
     engine.dispose()
 
 
-def test_inspect_streams_counts_without_source_metadata(tmp_path, caplog):
+def test_inspect_streams_counts_and_writes_snapshot(tmp_path, caplog):
     class FakeStorage:
         def iter_confirmed_topic_documents(self, **kwargs):
-            assert kwargs["include_source_metadata"] is False
+            assert kwargs["include_source_metadata"] is True
+
+            def row(corpus_id, text, annotations):
+                return {
+                    "corpus_id": corpus_id,
+                    "clean_text": text,
+                    "annotations": {"annotations": annotations},
+                    "source_type": "issue",
+                    "source_id": corpus_id,
+                    "parent_id": corpus_id,
+                    "content_hash": str(corpus_id),
+                    "repository": "repo/a",
+                    "created_at": datetime(2025, 1, 1),
+                    "github_url": f"https://github.test/issues/{corpus_id}",
+                }
+
             yield [
-                {
-                    "corpus_id": 1,
-                    "clean_text": "Cargo workspace dependency resolution",
-                    "annotations": {
-                        "annotations": [{"aspect": "package_manager", "class": "negative"}]
-                    },
-                },
-                {"corpus_id": 2, "clean_text": "Ignore", "annotations": {"annotations": []}},
+                row(
+                    1,
+                    "Cargo workspace dependency resolution",
+                    [{"aspect": "package_manager", "class": "negative"}],
+                ),
+                row(2, "Ignore", []),
             ]
             yield [
-                {
-                    "corpus_id": 3,
-                    "clean_text": "Hi",
-                    "annotations": {
-                        "annotations": [{"aspect": "package_manager", "class": "positive"}]
-                    },
-                },
-                {
-                    "corpus_id": 4,
-                    "clean_text": "Cargo feature resolver and build documentation",
-                    "annotations": {
-                        "annotations": [
-                            {"aspect": "package_manager", "class": "neutral"},
-                            {"aspect": "tooling_documentation", "class": "positive"},
-                        ]
-                    },
-                },
+                row(3, "Hi", [{"aspect": "package_manager", "class": "positive"}]),
+                row(
+                    4,
+                    "Cargo feature resolver and build documentation",
+                    [
+                        {"aspect": "package_manager", "class": "neutral"},
+                        {"aspect": "tooling_documentation", "class": "positive"},
+                    ],
+                ),
             ]
 
     with caplog.at_level(logging.INFO, logger="topic_analysis.service"):
@@ -160,7 +172,9 @@ def test_inspect_streams_counts_without_source_metadata(tmp_path, caplog):
                 "language": "en",
                 "max_chars": 4000,
                 "min_chars": 12,
-            }
+            },
+            output_root=tmp_path / "data/topics",
+            snapshot_name="snapshot-test",
         )
     assert result["selection"] == {
         "successful_rows": 4,
@@ -171,6 +185,9 @@ def test_inspect_streams_counts_without_source_metadata(tmp_path, caplog):
     }
     assert result["aspect_counts"]["package_manager"] == 2
     assert result["aspect_counts"]["tooling_documentation"] == 1
+    snapshot = tmp_path / "data/topics/snapshots/snapshot-test"
+    assert result["snapshot_dir"] == str(snapshot)
+    assert len((snapshot / "documents.jsonl").read_text(encoding="utf-8").splitlines()) == 2
     assert "inspect 开始" in caplog.text
     assert "已读取 2 条" in caplog.text
     assert "已读取 4 条" in caplog.text
@@ -217,6 +234,79 @@ def test_preparation_and_aspect_sampling_keep_sentiment_out_of_training_groups()
     assert len(first["package_manager"]) == 3
 
 
+def test_snapshot_fit_samples_before_retaining_text(tmp_path):
+    class FakeStorage:
+        def iter_confirmed_topic_documents(self, **_kwargs):
+            yield [
+                {
+                    "corpus_id": index,
+                    "source_type": "issue",
+                    "source_id": index,
+                    "parent_id": index,
+                    "content_hash": str(index),
+                    "clean_text": f"Package manager discussion number {index}",
+                    "annotations": {
+                        "annotations": [{"aspect": "package_manager", "class": "negative"}]
+                    },
+                    "repository": "repo/a",
+                    "created_at": datetime(2025, 1, 1),
+                    "github_url": f"https://github.test/issues/{index}",
+                }
+                for index in range(1, 31)
+            ]
+
+    config = {
+        "taxonomy_version": TAXONOMY_VERSION,
+        "prompt_version": "prompt-test",
+        "model_name": "chosen",
+        "cleaning_version": "clean-v2",
+        "language": "en",
+        "max_chars": 4000,
+        "min_chars": 12,
+        "aspects": ["package_manager"],
+        "max_docs_per_aspect": 3,
+        "seed": 5,
+    }
+    TopicAnalysis(FakeStorage(), tmp_path).inspect(
+        config, output_root=tmp_path / "data/topics", snapshot_name="source"
+    )
+    snapshot_dir = tmp_path / "data/topics/snapshots/source"
+    documents, members, _stats, _manifest = load_snapshot_documents(snapshot_dir, config=config)
+    expected = select_aspect_members(
+        {
+            index: TopicDocument(
+                index,
+                "issue",
+                index,
+                index,
+                str(index),
+                "repo/a",
+                datetime(2025, 1, 1),
+                "",
+                "",
+                {"package_manager": "negative"},
+            )
+            for index in range(1, 31)
+        },
+        aspects=("package_manager",),
+        max_per_aspect=3,
+        seed=5,
+    )
+    assert members == expected
+    assert set(documents) == set(expected["package_manager"])
+    assert len(documents) == 3
+
+    wrong_config = {**config, "cleaning_version": "clean-v3"}
+    with pytest.raises(ValueError, match="不一致"):
+        load_snapshot_documents(snapshot_dir, config=wrong_config)
+
+    document_file = snapshot_dir / "documents.jsonl"
+    original = document_file.read_text(encoding="utf-8")
+    document_file.write_text(original.replace("Package", "Packages", 1), encoding="utf-8")
+    with pytest.raises(ValueError, match="损坏"):
+        load_snapshot_documents(snapshot_dir, config=config)
+
+
 def test_rollups_use_aspect_month_and_repository_denominators():
     assignments = [
         {
@@ -257,7 +347,10 @@ def test_rollups_use_aspect_month_and_repository_denominators():
 
 def test_fit_writes_reviewable_snapshot_without_sentiment_split(tmp_path, monkeypatch, caplog):
     class FakeStorage:
+        calls = 0
+
         def iter_confirmed_topic_documents(self, **_kwargs):
+            self.calls += 1
             yield [
                 {
                     "corpus_id": index,
@@ -355,10 +448,17 @@ def test_fit_writes_reviewable_snapshot_without_sentiment_split(tmp_path, monkey
         "umap_neighbors": 2,
         "seed": 42,
     }
+    storage = FakeStorage()
+    analysis = TopicAnalysis(storage, tmp_path)
     with caplog.at_level(logging.INFO, logger="topic_analysis"):
-        result = TopicAnalysis(FakeStorage(), tmp_path).fit(
-            config, output_root=tmp_path / "data/topics", run_name="pilot"
+        analysis.inspect(config, output_root=tmp_path / "data/topics", snapshot_name="source")
+        result = analysis.fit(
+            config,
+            output_root=tmp_path / "data/topics",
+            run_name="pilot",
+            snapshot_name="source",
         )
+    assert storage.calls == 1
     output = tmp_path / "data/topics/pilot"
     assert result["aspect_stats"]["package_manager"]["outlier_count"] == 1
     with (output / "assignments.csv").open(encoding="utf-8-sig", newline="") as handle:
@@ -368,6 +468,6 @@ def test_fit_writes_reviewable_snapshot_without_sentiment_split(tmp_path, monkey
     assert (output / "review.csv").exists()
     assert (output / "models/package_manager.pkl").exists()
     assert "fit 开始" in caplog.text
-    assert "语料读取进度" in caplog.text
+    assert "fit 快照读取完成" in caplog.text
     assert "fit 开始训练方面 package_manager" in caplog.text
     assert "fit 完成：结果保存到" in caplog.text
