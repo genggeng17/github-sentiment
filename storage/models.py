@@ -286,6 +286,23 @@ class BertPrediction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
 
 
+class SentimentFact(Base):
+    """Latest successful annotation, one row per corpus/aspect; source time is UTC."""
+
+    __tablename__ = "sentiment_facts"
+    __table_args__ = (
+        Index("ix_sentiment_time", "created_at"),
+        Index("ix_sentiment_repo_time", "repository_id", "created_at"),
+        Index("ix_sentiment_aspect_class_time", "aspect", "sentiment", "created_at"),
+    )
+
+    corpus_id: Mapped[int] = mapped_column(ForeignKey("corpus.id"), primary_key=True)
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    aspect: Mapped[str] = mapped_column(String(40), primary_key=True)
+    sentiment: Mapped[str] = mapped_column(String(20), nullable=False)
+
+
 class PipelineRun(Base):
     __tablename__ = "pipeline_runs"
 

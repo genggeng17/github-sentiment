@@ -53,7 +53,7 @@ def test_default_glm_never_uses_legacy_deepseek_credentials(clean_environment):
     settings = Settings.from_env()
     assert settings.llm_provider == "glm"
     assert settings.labeling_model == "glm-5.3-flash"
-    assert settings.labeling_base_url == "https://open.bigmodel.cn/api/paas/v4"
+    assert settings.labeling_base_url == "https://open.bigmodel.cn/api/coding/paas/v4"
     with pytest.raises(ValueError, match="GLM_API_KEY"):
         settings.require_labeling()
 
@@ -123,7 +123,7 @@ def test_glm_pipeline_routes_request_and_saves_only_complete_content(monkeypatch
     )
     storage = Storage()
     result = pipeline.Pipeline(settings, storage).label(sample_name="all-aspects", limit=1)
-    assert captured["url"] == "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+    assert captured["url"] == "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
     assert captured["authorization"] == "Bearer glm-key"
     assert captured["timeout"] == 120
     payload = captured["payload"]

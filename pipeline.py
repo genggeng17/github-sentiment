@@ -288,6 +288,10 @@ def build_parser() -> argparse.ArgumentParser:
     collect = subparsers.add_parser("collect", help="执行历史回填或增量采集")
     add_collection_limit_arguments(collect)
     subparsers.add_parser("build-corpus", help="清洗原始数据并更新统一语料")
+    facts = subparsers.add_parser("refresh-sentiment-facts", help="刷新方面情感查询表")
+    facts.add_argument(
+        "--batch-size", type=positive_int, default=1000, help="每批语料数，默认 1000"
+    )
     sample = subparsers.add_parser("sample", help="按仓库构建版本化语料采样集")
     sample.add_argument("--name", required=True, help="不可变的采样集名称")
     sample.add_argument(
@@ -437,6 +441,9 @@ def main(argv: list[str] | None = None) -> int:
     callbacks: dict[str, Callable[[str], dict[str, Any]]] = {
         "collect": lambda run_id: pipeline.collect(run_id, limits=limits),
         "build-corpus": lambda _run_id: pipeline.build_corpus(),
+        "refresh-sentiment-facts": lambda _run_id: storage.refresh_sentiment_facts(
+            batch_size=args.batch_size
+        ),
         "sample": lambda _run_id: pipeline.build_sample(
             args.name,
             per_repository_limit=args.per_repository,

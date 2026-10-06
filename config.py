@@ -57,7 +57,7 @@ class Settings:
     http_max_retries: int = 5
     llm_provider: str = "glm"
     glm_api_key: str = ""
-    glm_base_url: str = "https://open.bigmodel.cn/api/paas/v4"
+    glm_base_url: str = "https://open.bigmodel.cn/api/coding/paas/v4"
     glm_model: str = "glm-5.3-flash"
     glm_reasoning_effort: str = "low"
     glm_max_tokens: int = 8192
@@ -106,7 +106,7 @@ class Settings:
             llm_provider=provider,
             glm_api_key=os.getenv("GLM_API_KEY", "").strip(),
             glm_base_url=os.getenv(
-                "GLM_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"
+                "GLM_BASE_URL", "https://open.bigmodel.cn/api/coding/paas/v4"
             ).strip().rstrip("/"),
             glm_model=os.getenv("GLM_MODEL", "glm-5.3-flash").strip(),
             glm_reasoning_effort=reasoning_effort,

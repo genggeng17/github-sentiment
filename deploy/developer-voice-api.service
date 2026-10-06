@@ -1,0 +1,18 @@
+[Unit]
+Description=Developer Voice read-only analytics API
+After=network.target
+
+[Service]
+Type=simple
+User=developer-voice
+Group=developer-voice
+WorkingDirectory=/opt/GITHUB-SENTIMENT/github-sentiment
+EnvironmentFile=/opt/GITHUB-SENTIMENT/github-sentiment/.env
+ExecStart=/opt/GITHUB-SENTIMENT/github-sentiment/.venv/bin/uvicorn api.app:create_app --factory --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

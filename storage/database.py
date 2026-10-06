@@ -9,10 +9,16 @@ from typing import Any
 from sqlalchemy import (
     Engine,
     Select,
+    and_,
+    case,
     create_engine,
     delete,
+    distinct,
+    extract,
     func,
+    insert,
     inspect,
+    or_,
     select,
     text,
     union_all,
@@ -20,7 +26,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, aliased, sessionmaker
+
+from taxonomy import CLASSES
 
 from .models import (
     Base,
@@ -38,6 +46,7 @@ from .models import (
     Repository,
     RepositoryCursor,
     RunStatus,
+    SentimentFact,
     UnresolvedCollectionItem,
     utcnow,
 )
@@ -1037,6 +1046,201 @@ class Storage:
             ["corpus_id", "taxonomy_version", "prompt_version", "model_name"],
             ["raw_response", "parsed_result", "status", "error_message", "updated_at"],
         )
+
+    def refresh_sentiment_facts(self, *, batch_size: int = 1000) -> dict[str, int]:
+        """Atomically rebuild the query table from latest successful annotations."""
+        if batch_size <= 0:
+            raise ValueError("batch_size 必须大于 0")
+        newer = aliased(LlmAnnotation)
+        has_newer = (
+            select(newer.id)
+            .where(
+                newer.corpus_id == LlmAnnotation.corpus_id,
+                newer.status == "succeeded",
+                or_(
+                    newer.updated_at > LlmAnnotation.updated_at,
+                    and_(
+                        newer.updated_at == LlmAnnotation.updated_at,
+                        newer.id > LlmAnnotation.id,
+                    ),
+                ),
+            )
+            .exists()
+        )
+        query = (
+            select(
+                LlmAnnotation.corpus_id,
+                LlmAnnotation.parsed_result,
+                Corpus.source_type,
+                Corpus.source_id,
+            )
+            .join(Corpus, Corpus.id == LlmAnnotation.corpus_id)
+            .where(LlmAnnotation.status == "succeeded", ~has_newer)
+        )
+        source_models = {
+            "issue": Issue,
+            "pull_request": PullRequest,
+            "issue_comment": IssueComment,
+            "pr_issue_comment": PullRequestComment,
+            "pr_review_comment": PullRequestComment,
+        }
+        stats = {"scanned_corpus": 0, "included_corpus": 0, "empty_corpus": 0, "rows": 0}
+        last_id = 0
+        with self.sessions.begin() as session:
+            session.execute(delete(SentimentFact))
+            while True:
+                records = session.execute(
+                    query.where(LlmAnnotation.corpus_id > last_id)
+                    .order_by(LlmAnnotation.corpus_id)
+                    .limit(batch_size)
+                ).mappings().all()
+                if not records:
+                    break
+                last_id = records[-1]["corpus_id"]
+                source_metadata = {}
+                for source_type, model in source_models.items():
+                    ids = {row["source_id"] for row in records if row["source_type"] == source_type}
+                    if ids:
+                        for source_id, repository_id, created_at in session.execute(
+                            select(model.id, model.repository_id, model.created_at)
+                            .where(model.id.in_(ids))
+                        ):
+                            source_metadata[(source_type, source_id)] = (repository_id, created_at)
+                facts = []
+                for row in records:
+                    stats["scanned_corpus"] += 1
+                    payload = row["parsed_result"]
+                    annotations = payload.get("annotations") if isinstance(payload, dict) else None
+                    if not isinstance(annotations, list):
+                        raise ValueError(f"语料 {row['corpus_id']} 的成功标注缺少 annotations 数组")
+                    labels = {}
+                    for item in annotations:
+                        if not isinstance(item, dict):
+                            raise ValueError(f"语料 {row['corpus_id']} 的标注项不是对象")
+                        aspect = item.get("aspect")
+                        if aspect is None or (isinstance(aspect, str) and not aspect.strip()):
+                            continue
+                        if not isinstance(aspect, str) or len(aspect.strip()) > 40:
+                            raise ValueError(f"语料 {row['corpus_id']} 的 aspect 无效")
+                        aspect = aspect.strip()
+                        sentiment = item.get("class")
+                        if not isinstance(sentiment, str) or sentiment not in CLASSES:
+                            raise ValueError(f"语料 {row['corpus_id']} 的情感标签无效")
+                        if aspect in labels:
+                            raise ValueError(f"语料 {row['corpus_id']} 的 aspect 重复: {aspect}")
+                        labels[aspect] = sentiment
+                    if not labels:
+                        stats["empty_corpus"] += 1
+                        continue
+                    key = (row["source_type"], row["source_id"])
+                    if key not in source_metadata:
+                        raise RuntimeError(f"查询表语料来源缺失: {key}")
+                    repository_id, created_at = source_metadata[key]
+                    facts.extend(
+                        {
+                            "corpus_id": row["corpus_id"],
+                            "repository_id": repository_id,
+                            "created_at": created_at,
+                            "aspect": aspect,
+                            "sentiment": sentiment,
+                        }
+                        for aspect, sentiment in labels.items()
+                    )
+                    stats["included_corpus"] += 1
+                if facts:
+                    session.execute(insert(SentimentFact), facts)
+                stats["rows"] += len(facts)
+                logger.info(
+                    "查询表刷新中: 已扫描 %d 条语料，生成 %d 行",
+                    stats["scanned_corpus"],
+                    stats["rows"],
+                )
+        return stats
+
+    def sentiment_statistics(
+        self, start_at: datetime, end_at: datetime, *,
+        aspect: str | None = None, repository_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Aggregate the narrow fact table; end_at is exclusive, times are UTC."""
+        conditions = [SentimentFact.created_at >= start_at, SentimentFact.created_at < end_at]
+        if repository_id is not None:
+            conditions.append(SentimentFact.repository_id == repository_id)
+        summary_conditions = [*conditions]
+        if aspect is not None:
+            summary_conditions.append(SentimentFact.aspect == aspect)
+        year = extract("year", SentimentFact.created_at)
+        month = extract("month", SentimentFact.created_at)
+        with self.sessions() as session:
+            counts = session.execute(
+                select(
+                    year.label("year"), month.label("month"), SentimentFact.aspect,
+                    SentimentFact.sentiment, func.count().label("count"),
+                )
+                .where(*conditions)
+                .group_by(year, month, SentimentFact.aspect, SentimentFact.sentiment)
+            ).mappings().all()
+            summary = dict(session.execute(
+                select(
+                    func.count(distinct(SentimentFact.corpus_id)).label("total_count"),
+                    func.count().label("aspect_count"),
+                    func.count(distinct(case(
+                        (SentimentFact.sentiment == "positive", SentimentFact.corpus_id)
+                    ))).label("positive_count"),
+                    func.count(distinct(case(
+                        (SentimentFact.sentiment == "negative", SentimentFact.corpus_id)
+                    ))).label("negative_count"),
+                ).where(*summary_conditions)
+            ).mappings().one())
+            updated_at = session.scalar(
+                select(func.max(PipelineRun.completed_at)).where(
+                    PipelineRun.run_type == "refresh-sentiment-facts",
+                    PipelineRun.status == RunStatus.SUCCEEDED.value,
+                )
+            )
+        return {"counts": [dict(row) for row in counts], "summary": summary,
+                "updated_at": updated_at}
+
+    def sentiment_fact_metadata(self) -> dict[str, Any]:
+        with self.sessions() as session:
+            return dict(session.execute(select(
+                func.count().label("aspect_count"),
+                func.count(distinct(SentimentFact.corpus_id)).label("corpus_count"),
+                func.min(SentimentFact.created_at).label("first_created_at"),
+                func.max(SentimentFact.created_at).label("last_created_at"),
+            )).mappings().one())
+
+    def sentiment_repositories(self) -> list[dict[str, Any]]:
+        with self.sessions() as session:
+            return [dict(row) for row in session.execute(
+                select(Repository.id.label("repository_id"), Repository.full_name,
+                       func.count(distinct(SentimentFact.corpus_id)).label("corpus_count"))
+                .join(SentimentFact, SentimentFact.repository_id == Repository.id)
+                .group_by(Repository.id, Repository.full_name)
+                .order_by(Repository.full_name)
+            ).mappings()]
+
+    def query_sentiment_facts(
+        self, start_at: datetime, end_at: datetime, *, aspect: str | None = None,
+        sentiment: str | None = None, repository_id: int | None = None,
+        after_corpus_id: int = 0, after_aspect: str = "", limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        conditions = [
+            SentimentFact.created_at >= start_at, SentimentFact.created_at < end_at,
+            or_(SentimentFact.corpus_id > after_corpus_id,
+                and_(SentimentFact.corpus_id == after_corpus_id,
+                     SentimentFact.aspect > after_aspect)),
+        ]
+        for column, value in ((SentimentFact.aspect, aspect), (SentimentFact.sentiment, sentiment),
+                              (SentimentFact.repository_id, repository_id)):
+            if value is not None:
+                conditions.append(column == value)
+        with self.sessions() as session:
+            return [dict(row) for row in session.execute(
+                select(SentimentFact.corpus_id, SentimentFact.repository_id,
+                       SentimentFact.created_at, SentimentFact.aspect, SentimentFact.sentiment)
+                .where(*conditions)
+                .order_by(SentimentFact.corpus_id, SentimentFact.aspect).limit(limit)
+            ).mappings()]
 
     def iter_confirmed_topic_documents(
         self,

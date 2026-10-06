@@ -1,0 +1,1052 @@
+{
+  "sample": {
+    "id": 4,
+    "name": "rust-all-aspects-v2-10k",
+    "per_repository_limit": 130000,
+    "seed": "20260917",
+    "status": "completed",
+    "stats": {
+      "name": "rust-all-aspects-v2-10k",
+      "seed": "20260917",
+      "reused": false,
+      "aspects": {
+        "safety": {
+          "eligible": 2143,
+          "selected": 2143,
+          "shortage": 7857,
+          "requested": 10000
+        },
+        "community": {
+          "eligible": 639,
+          "selected": 639,
+          "shortage": 9361,
+          "requested": 10000
+        },
+        "ownership": {
+          "eligible": 3144,
+          "selected": 3144,
+          "shortage": 6856,
+          "requested": 10000
+        },
+        "type_system": {
+          "eligible": 12103,
+          "selected": 10000,
+          "shortage": 0,
+          "requested": 10000
+        },
+        "compile_time": {
+          "eligible": 7494,
+          "selected": 7494,
+          "shortage": 2506,
+          "requested": 10000
+        },
+        "learning_curve": {
+          "eligible": 5055,
+          "selected": 5055,
+          "shortage": 4945,
+          "requested": 10000
+        },
+        "package_manager": {
+          "eligible": 46131,
+          "selected": 10000,
+          "shortage": 0,
+          "requested": 10000
+        },
+        "api_extensibility": {
+          "eligible": 8313,
+          "selected": 8313,
+          "shortage": 1687,
+          "requested": 10000
+        },
+        "runtime_performance": {
+          "eligible": 7721,
+          "selected": 7721,
+          "shortage": 2279,
+          "requested": 10000
+        },
+        "libraries_frameworks": {
+          "eligible": 11529,
+          "selected": 10000,
+          "shortage": 0,
+          "requested": 10000
+        },
+        "diagnostics_debugging": {
+          "eligible": 5515,
+          "selected": 5515,
+          "shortage": 4485,
+          "requested": 10000
+        },
+        "tooling_documentation": {
+          "eligible": 30335,
+          "selected": 10000,
+          "shortage": 0,
+          "requested": 10000
+        },
+        "readability_maintainability": {
+          "eligible": 4991,
+          "selected": 4991,
+          "shortage": 5009,
+          "requested": 10000
+        }
+      },
+      "scanned": 863528,
+      "selected": 73691,
+      "sample_set_id": 4,
+      "cleaning_version": "clean-v1",
+      "selection_config": {
+        "method": "lexicon",
+        "quotas": {
+          "safety": 10000,
+          "community": 10000,
+          "ownership": 10000,
+          "type_system": 10000,
+          "compile_time": 10000,
+          "learning_curve": 10000,
+          "package_manager": 10000,
+          "api_extensibility": 10000,
+          "runtime_performance": 10000,
+          "libraries_frameworks": 10000,
+          "diagnostics_debugging": 10000,
+          "tooling_documentation": 10000,
+          "readability_maintainability": 10000
+        },
+        "filters": {
+          "safety": {
+            "source_types": null,
+            "min_target_chars": 1,
+            "repository_names": null,
+            "per_repository_limit": null,
+            "max_model_input_chars": 4000
+          },
+          "community": {
+            "source_types": null,
+            "min_target_chars": 1,
+            "repository_names": null,
+            "per_repository_limit": null,
+            "max_model_input_chars": 4000
+          },
+          "ownership": {
+            "source_types": null,
+            "min_target_chars": 1,
+            "repository_names": null,
+            "per_repository_limit": null,
+            "max_model_input_chars": 4000
+          },
+          "type_system": {
+            "source_types": null,
+            "min_target_chars": 1,
+            "repository_names": null,
+            "per_repository_limit": null,
+            "max_model_input_chars": 4000
+          },
+          "compile_time": {
+            "source_types": null,
+            "min_target_chars": 1,
+            "repository_names": null,
+            "per_repository_limit": null,
+            "max_model_input_chars": 4000
+          },
+          "learning_curve": {
+            "source_types": null,
+            "min_target_chars": 1,
+            "repository_names": null,
+            "per_repository_limit": null,
+            "max_model_input_chars": 4000
+          },
+          "package_manager": {
+            "source_types": null,
+            "min_target_chars": 1,
+            "repository_names": null,
+            "per_repository_limit": null,
+            "max_model_input_chars": 4000
+          },
+          "api_extensibility": {
+            "source_types": null,
+            "min_target_chars": 1,
+            "repository_names": null,
+            "per_repository_limit": null,
+            "max_model_input_chars": 4000
+          },
+          "runtime_performance": {
+            "source_types": null,
+            "min_target_chars": 1,
+            "repository_names": null,
+            "per_repository_limit": null,
+            "max_model_input_chars": 4000
+          },
+          "libraries_frameworks": {
+            "source_types": null,
+            "min_target_chars": 1,
+            "repository_names": null,
+            "per_repository_limit": null,
+            "max_model_input_chars": 4000
+          },
+          "diagnostics_debugging": {
+            "source_types": null,
+            "min_target_chars": 1,
+            "repository_names": null,
+            "per_repository_limit": null,
+            "max_model_input_chars": 4000
+          },
+          "tooling_documentation": {
+            "source_types": null,
+            "min_target_chars": 1,
+            "repository_names": null,
+            "per_repository_limit": null,
+            "max_model_input_chars": 4000
+          },
+          "readability_maintainability": {
+            "source_types": null,
+            "min_target_chars": 1,
+            "repository_names": null,
+            "per_repository_limit": null,
+            "max_model_input_chars": 4000
+          }
+        },
+        "lexicon": {
+          "aspects": {
+            "safety": {
+              "rules": [
+                {
+                  "id": "safety.mechanisms",
+                  "all": [
+                    "\\b(?:memory saf(?:e|ety)|thread saf(?:e|ety)|data races?|undefined behavio[ur]|use.after.free|double.free|dangling (?:pointers?|references?)|soundness|unsound(?:ness)?)\\b"
+                  ]
+                },
+                {
+                  "id": "safety.unsafe",
+                  "all": [
+                    "\\bunsafe\\b",
+                    "\\b(?:invariants?|contracts?|guarantee\\w*|sound|safety|boundar\\w*|preconditions?|alias\\w*|audit\\w*|encapsulat\\w*|responsib\\w*)\\b"
+                  ]
+                },
+                {
+                  "id": "safety.send_sync",
+                  "all": [
+                    "\\b(?:Send|Sync)\\b",
+                    "\\b(?:safety|soundness|unsound|data races?|thread.safe|across threads)\\b"
+                  ]
+                },
+                {
+                  "id": "safety.zh",
+                  "all": [
+                    "内存安全|线程安全|数据竞争|未定义行为|悬垂(?:指针|引用)|重复释放|释放后使用|安全不变量|不健全"
+                  ]
+                }
+              ],
+              "filters": {}
+            },
+            "community": {
+              "rules": [
+                {
+                  "id": "community.culture",
+                  "all": [
+                    "\\b(?:community|communities|contributors?|maintainers?|project governance|moderators?)\\b",
+                    "\\b(?:welcom\\w*|inclusi\\w*|friendly|unfriendly|hostil\\w*|toxic\\w*|respect\\w*|harass\\w*|governance|conduct|collaborat\\w*|communicat\\w*|participat\\w*|burnout|onboarding|supportive)\\b"
+                  ]
+                },
+                {
+                  "id": "community.support",
+                  "all": [
+                    "\\b(?:maintainers?|community|contributors?|support (?:requests?|channels?|forums?))\\b",
+                    "\\b(?:responsiveness|responsive|unresponsive|response times?|unanswered|ignored|helpful|unhelpful|triage|mentoring|mentorship|decision.making)\\b"
+                  ]
+                },
+                {
+                  "id": "community.process",
+                  "all": [
+                    "\\b(?:contribution guidelines?|contributor guide|code of conduct|governance model|rfc process|decision.making process)\\b"
+                  ]
+                },
+                {
+                  "id": "community.zh",
+                  "all": [
+                    "社区|维护者|贡献者|协作者",
+                    "氛围|包容|友好|敌意|治理|协作|沟通|参与|响应|求助|指导|骚扰|行为准则"
+                  ]
+                }
+              ],
+              "filters": {}
+            },
+            "ownership": {
+              "rules": [
+                {
+                  "id": "ownership.mechanisms",
+                  "all": [
+                    "\\b(?:borrow checker|borrow checking|ownership model|lifetime (?:elision|annotations?|parameters?|bounds?)|non.lexical lifetimes?|reborrowing|partial moves?|move semantics)\\b"
+                  ]
+                },
+                {
+                  "id": "ownership.constraints",
+                  "all": [
+                    "\\b(?:ownership|borrowing|borrows?|borrowed|lifetimes?)\\b",
+                    "\\b(?:rust|mutab\\w*|immutab\\w*|alias\\w*|references?|owned|moves?|moving|clon\\w*|outlive\\w*|restrict\\w*|limit\\w*|elision|captur\\w*)\\b"
+                  ]
+                },
+                {
+                  "id": "ownership.transfer",
+                  "all": [
+                    "\\b(?:takes?|taking|transfers?|transferring|retain(?:s|ing)?|shares?|sharing) ownership\\b",
+                    "\\b(?:buffers?|values?|variables?|references?|pointers?|handles?|strings?|vec|vectors?|objects?|self|data)\\b"
+                  ]
+                },
+                {
+                  "id": "ownership.zh",
+                  "all": [
+                    "所有权|借用检查|可变借用|不可变借用|移动语义|生命周期(?:约束|标注|省略|参数)|重借用"
+                  ]
+                }
+              ],
+              "filters": {}
+            },
+            "type_system": {
+              "rules": [
+                {
+                  "id": "types.mechanisms",
+                  "all": [
+                    "\\b(?:type inference|type system|type safety|type checking|type constraints?|type annotations?|type parameters?|associated types?|higher.ranked|variadic generics|const generics|generic associated types|static dispatch|dynamic dispatch|trait objects?|trait bounds?|impl trait)\\b"
+                  ]
+                },
+                {
+                  "id": "types.generics",
+                  "all": [
+                    "\\b(?:generics?|traits?)\\b",
+                    "\\b(?:express\\w*|infer\\w*|bounds?|constraints?|specializ\\w*|coherence|implement\\w*|monomorph\\w*|limitation\\w*)\\b"
+                  ]
+                },
+                {
+                  "id": "types.zh",
+                  "all": [
+                    "类型推导|类型系统|关联类型|泛型|类型约束|特征约束|动态分派|静态分派"
+                  ]
+                }
+              ],
+              "filters": {}
+            },
+            "compile_time": {
+              "rules": [
+                {
+                  "id": "compile.metrics",
+                  "all": [
+                    "\\b(?:(?:compile|compilation|build|rebuild|linking|codegen) times?|compilation speed|build latency)\\b"
+                  ]
+                },
+                {
+                  "id": "compile.cost",
+                  "all": [
+                    "\\b(?:compil(?:e|es|ed|ing|ation)|builds?|building|rebuilds?|rebuilding|linking|codegen|code generation|monomorphization)\\b",
+                    "\\b(?:slow(?:er)?|fast(?:er)?|speedup|speed.up|bottleneck|time.consuming|takes?|took|seconds?|minutes?|hours?|overhead)\\b"
+                  ]
+                },
+                {
+                  "id": "compile.incremental",
+                  "all": [
+                    "\\b(?:incremental (?:compilation|builds?)|recompil(?:e|es|ing|ation)|rebuilds?)\\b",
+                    "\\b(?:cach\\w*|invalida\\w*|reuse|unnecessary|redundan\\w*|avoid\\w*|efficien\\w*)\\b"
+                  ]
+                },
+                {
+                  "id": "compile.zh",
+                  "all": [
+                    "(?:编译|构建|链接|代码生成)(?:时间|耗时|速度|效率|太慢|很慢)|增量编译|重复编译|不必要的重新编译"
+                  ]
+                }
+              ],
+              "filters": {}
+            },
+            "learning_curve": {
+              "rules": [
+                {
+                  "id": "learning.rust",
+                  "all": [
+                    "\\b(?:rust|ownership|borrowing|borrow checker|lifetimes?|traits?)\\b",
+                    "\\b(?:learn\\w*|understand\\w*|confus\\w*|beginners?|newcomers?|newbies|intuit\\w*|unintuit\\w*)\\b"
+                  ]
+                },
+                {
+                  "id": "learning.cost",
+                  "all": [
+                    "\\b(?:rust|ownership|borrowing|lifetimes?|type system)\\b",
+                    "\\b(?:learning curve|mental model|cognitive load|getting started|hard to grasp|difficult to grasp|took me .* to)\\b"
+                  ]
+                },
+                {
+                  "id": "learning.zh",
+                  "all": [
+                    "[Rr]ust|所有权|借用|生命周期|类型系统",
+                    "学习|理解|入门|初学|心智|认知|难懂|困惑"
+                  ]
+                }
+              ],
+              "filters": {}
+            },
+            "package_manager": {
+              "rules": [
+                {
+                  "id": "package.cargo",
+                  "all": [
+                    "\\bcargo\\b",
+                    "\\b(?:dependenc\\w*|resolver?|versions?|lockfiles?|workspace|features?|registr(?:y|ies)|publish\\w*|download\\w*)\\b"
+                  ]
+                },
+                {
+                  "id": "package.features",
+                  "all": [
+                    "\\b(?:default.features|feature unification|feature flags?|optional dependenc\\w*|dependency resolution|dependency conflicts?|version conflicts?|semver|lockfile|Cargo\\.lock|Cargo\\.toml|crates\\.io)\\b"
+                  ]
+                },
+                {
+                  "id": "package.workspace",
+                  "all": [
+                    "\\bworkspace\\b",
+                    "\\b(?:members?|dependenc\\w*|inherit\\w*|resolver?|features?)\\b"
+                  ]
+                },
+                {
+                  "id": "package.zh",
+                  "all": [
+                    "依赖解析|版本冲突|默认特性|包管理|锁文件|依赖管理|依赖版本"
+                  ]
+                }
+              ],
+              "filters": {}
+            },
+            "api_extensibility": {
+              "rules": [
+                {
+                  "id": "api.properties",
+                  "all": [
+                    "\\b(?:api|interface|abstraction|trait|constructor|builder)\\b",
+                    "\\b(?:ergonom\\w*|extensib\\w*|composab\\w*|customiz\\w*|customis\\w*|reusab\\w*|flexib\\w*|inconsisten\\w*|consisten\\w*|easy to use|easier to use|hard to use|difficult to (?:use|extend)|good defaults)\\b"
+                  ]
+                },
+                {
+                  "id": "api.extension",
+                  "all": [
+                    "\\b(?:api|interface|trait|methods?|constructor|fields?|parameters?|return type)\\b",
+                    "\\b(?:expose|exposes|exposing|public|private|visibility|sealed|custom|third.party|downstream|extension points?|hooks?|backends?)\\b",
+                    "\\b(?:expos\\w*|allow\\w*|enabl\\w*|prevent\\w*|custom\\w*|extend\\w*|implement\\w*|design|access\\w*|usab\\w*|reuse|integrat\\w*|breaking|chang\\w*)\\b"
+                  ]
+                },
+                {
+                  "id": "api.composition",
+                  "all": [
+                    "\\b(?:api|interface|abstraction|builder|callbacks?|plugins?)\\b",
+                    "\\b(?:compos\\w*|integrat\\w*|extend\\w*|reuse|reusable|custom|configur\\w*)\\b"
+                  ]
+                },
+                {
+                  "id": "api.zh",
+                  "all": [
+                    "接口|API|抽象|构造器|构造函数|参数|返回类型",
+                    "易用|一致|通用|组合|复用|定制|自定义|扩展|集成|可见性|公开|私有"
+                  ]
+                }
+              ],
+              "filters": {}
+            },
+            "runtime_performance": {
+              "rules": [
+                {
+                  "id": "runtime.metrics",
+                  "all": [
+                    "\\b(?:runtime performance|run.time (?:performance|overhead)|throughput|latency|memory (?:usage|consumption|footprint)|cpu (?:usage|utilization)|allocation overhead|cache locality|startup (?:time|latency))\\b"
+                  ]
+                },
+                {
+                  "id": "runtime.work",
+                  "all": [
+                    "\\b(?:queries|requests?|parsing|parser|serialization|deserialization|allocations?|disk reads?|i/o|hot path|execution)\\b",
+                    "\\b(?:faster|slower|slow|fast|overhead|bottleneck|speedup|speed.up|wast\\w*|redundan\\w*|reduc\\w*|avoid\\w*)\\b"
+                  ]
+                },
+                {
+                  "id": "runtime.benchmarks",
+                  "all": [
+                    "\\b(?:runtime|throughput|latency|allocations?|memory|cpu|execut\\w*|queries|requests?)\\b",
+                    "\\b(?:benchmarks?|profiling|regress\\w*|optimi[sz]\\w*|performan\\w*|efficien\\w*)\\b"
+                  ]
+                },
+                {
+                  "id": "runtime.zh",
+                  "all": [
+                    "运行(?:时)?性能|吞吐量|内存(?:占用|消耗)|CPU(?:占用|使用率)|启动(?:时间|耗时)|运行(?:速度|效率)|分配开销|缓存局部性|(?:请求|查询|网络)延迟"
+                  ]
+                }
+              ],
+              "filters": {}
+            },
+            "libraries_frameworks": {
+              "rules": [
+                {
+                  "id": "libraries.quality",
+                  "all": [
+                    "\\b(?:librar(?:y|ies)|crates?|frameworks?|ecosystem)\\b",
+                    "\\b(?:matur\\w*|maintain\\w*|unmaintained|abandon\\w*|stabl\\w*|stability|reliab\\w*|unreliab\\w*|production.ready|compatib\\w*|incompatib\\w*)\\b"
+                  ]
+                },
+                {
+                  "id": "libraries.coverage",
+                  "all": [
+                    "\\b(?:librar(?:y|ies)|crates?|frameworks?|ecosystem)\\b",
+                    "\\b(?:lack\\w*|missing|alternatives?|available|availability|support(?:s|ed)?|cross.platform)\\b"
+                  ]
+                },
+                {
+                  "id": "libraries.adoption",
+                  "all": [
+                    "\\b(?:librar(?:y|ies)|crates?|frameworks?)\\b",
+                    "\\b(?:recommend\\w*|adopt\\w*|migrat\\w*|unusable|keeps? crashing|breaks? compatibility)\\b"
+                  ]
+                },
+                {
+                  "id": "libraries.zh",
+                  "all": [
+                    "第三方库|框架|生态|依赖库",
+                    "成熟|稳定|维护|兼容|缺少|支持|可用|推荐"
+                  ]
+                }
+              ],
+              "filters": {}
+            },
+            "diagnostics_debugging": {
+              "rules": [
+                {
+                  "id": "diagnostics.quality",
+                  "all": [
+                    "\\b(?:diagnostics?|error messages?|warnings?|compiler errors?|help messages?|(?:compiler|fix|diagnostic|fix.it) suggestions?)\\b",
+                    "\\b(?:explain\\w*|clear\\w*|unclear|confus\\w*|mislead\\w*|helpful|unhelpful|useful|useless|accurat\\w*|inaccurat\\w*|point(?:s|ed|ing)?|location|span|actionable|wording|wrong|incorrect|missing)\\b"
+                  ]
+                },
+                {
+                  "id": "diagnostics.debugging",
+                  "all": [
+                    "\\b(?:debugger|debugging|backtraces?|stack traces?|breakpoints?|gdb|lldb)\\b",
+                    "\\b(?:inspect\\w*|step(?:ping)?|locat\\w*|diagnos\\w*|symbols?|variables?|frames?|unwind\\w*|useful|helpful|confus\\w*|mislead\\w*|missing|wrong|broken)\\b"
+                  ]
+                },
+                {
+                  "id": "diagnostics.localization",
+                  "all": [
+                    "\\b(?:track down|pinpoint|locate|identify|diagnose)\\b",
+                    "\\b(?:root cause|source of (?:the |this )?(?:error|bug|panic)|cause of (?:the |this )?(?:error|bug|panic))\\b"
+                  ]
+                },
+                {
+                  "id": "diagnostics.zh",
+                  "all": [
+                    "错误提示|报错信息|诊断信息|警告|调试器|回溯|堆栈",
+                    "清晰|准确|误导|困惑|有用|无用|定位|解释|建议|缺少|符号|变量"
+                  ]
+                }
+              ],
+              "filters": {}
+            },
+            "tooling_documentation": {
+              "rules": [
+                {
+                  "id": "tooling.tools",
+                  "all": [
+                    "\\b(?:rust.analyzer|clippy|rustfmt|rustdoc|ide|intellij|vscode|vs code|code completion|autocompletion)\\b",
+                    "\\b(?:support\\w*|work(?:s|ing)?|fail\\w*|crash\\w*|slow|fast|hang\\w*|unresponsive|configur\\w*|format\\w*|completion|navigation|integrat\\w*|usab\\w*|reliab\\w*)\\b"
+                  ]
+                },
+                {
+                  "id": "tooling.docs",
+                  "all": [
+                    "\\b(?:documentation|docs|tutorials?|guides?|readme|rust book|api reference)\\b",
+                    "\\b(?:explain\\w*|cover\\w*|lack\\w*|missing|outdated|incorrect|wrong|accurat\\w*|clear\\w*|unclear|confus\\w*|helpful|useful|incomplete|examples?|discover\\w*)\\b"
+                  ]
+                },
+                {
+                  "id": "tooling.examples",
+                  "all": [
+                    "\\b(?:examples?|tutorials?)\\b",
+                    "\\b(?:documented|documentation|outdated|misleading|missing|incomplete|runnable|compilable|does not compile|do not compile)\\b"
+                  ]
+                },
+                {
+                  "id": "tooling.zh",
+                  "all": [
+                    "文档|教程|示例|rust-analyzer|Clippy|rustfmt|rustdoc|IDE",
+                    "清晰|覆盖|缺少|过时|准确|误导|解释|补全|跳转|格式化|卡顿|崩溃|支持"
+                  ]
+                }
+              ],
+              "filters": {}
+            },
+            "readability_maintainability": {
+              "rules": [
+                {
+                  "id": "readability.properties",
+                  "all": [
+                    "\\b(?:readability|maintainability|testability|technical debt|code duplication|duplicated code|duplicate code|boilerplate|cyclomatic complexity|separation of concerns)\\b"
+                  ]
+                },
+                {
+                  "id": "readability.code",
+                  "all": [
+                    "\\b(?:code|implementation|function|module|refactor\\w*|logic|structure|design)\\b",
+                    "\\b(?:readable|unreadable|maintainable|unmaintainable|unnecessarily complex|hard to (?:read|follow|maintain|test)|easier to (?:read|follow|maintain|test)|difficult to (?:read|follow|maintain|test)|easy to (?:read|follow|maintain|test)|duplicat\\w*|tightly coupled)\\b"
+                  ]
+                },
+                {
+                  "id": "readability.refactor",
+                  "all": [
+                    "\\brefactor\\w*\\b",
+                    "\\b(?:simplif\\w*|complexity|coupling|duplication|modular\\w*|testab\\w*|readab\\w*)\\b"
+                  ]
+                },
+                {
+                  "id": "readability.zh",
+                  "all": [
+                    "可读性|可维护性|可测试性|技术债|重复代码|代码重复|样板代码|代码耦合|(?:代码|实现|逻辑)(?:难读|易读|复杂)|难以维护"
+                  ]
+                }
+              ],
+              "filters": {}
+            }
+          },
+          "version": "rust-targeted-v2",
+          "description": "13 方面候选检索；保留 v1 四方面规则并补齐其余九方面。all 内表达式须在 TARGET 同一自然语言段落出现。命中不是标签，不预判情感；filters 可按方面覆盖公共筛选条件。",
+          "schema_version": 1
+        },
+        "lexicon_sha256": "5148b1dfdedea2ad082ea1cb18bf1f79c95b9858308f867bdf9cd90130061cd6",
+        "overlap_policy": "shared_candidates_unique_union",
+        "matcher_version": "target-prose-regex-v1",
+        "repository_snapshot": [
+          {
+            "id": 1,
+            "full_name": "rust-lang/cargo"
+          },
+          {
+            "id": 2,
+            "full_name": "rust-lang/rust-clippy"
+          },
+          {
+            "id": 3,
+            "full_name": "rust-lang/rust-analyzer"
+          },
+          {
+            "id": 4,
+            "full_name": "tokio-rs/tokio"
+          },
+          {
+            "id": 5,
+            "full_name": "serde-rs/serde"
+          },
+          {
+            "id": 6,
+            "full_name": "rust-lang/rust"
+          },
+          {
+            "id": 7,
+            "full_name": "rust-lang/rustup"
+          },
+          {
+            "id": 8,
+            "full_name": "rust-lang/rustfmt"
+          },
+          {
+            "id": 9,
+            "full_name": "rust-lang/miri"
+          },
+          {
+            "id": 10,
+            "full_name": "rust-lang/rustlings"
+          },
+          {
+            "id": 11,
+            "full_name": "rust-lang/mdBook"
+          },
+          {
+            "id": 12,
+            "full_name": "rust-lang/rust-bindgen"
+          },
+          {
+            "id": 13,
+            "full_name": "rust-lang/libc"
+          },
+          {
+            "id": 14,
+            "full_name": "rayon-rs/rayon"
+          },
+          {
+            "id": 15,
+            "full_name": "crossbeam-rs/crossbeam"
+          },
+          {
+            "id": 16,
+            "full_name": "rust-lang/regex"
+          },
+          {
+            "id": 17,
+            "full_name": "clap-rs/clap"
+          },
+          {
+            "id": 18,
+            "full_name": "tokio-rs/axum"
+          },
+          {
+            "id": 19,
+            "full_name": "hyperium/hyper"
+          },
+          {
+            "id": 20,
+            "full_name": "seanmonstar/reqwest"
+          },
+          {
+            "id": 21,
+            "full_name": "tower-rs/tower"
+          },
+          {
+            "id": 22,
+            "full_name": "actix/actix-web"
+          },
+          {
+            "id": 23,
+            "full_name": "diesel-rs/diesel"
+          },
+          {
+            "id": 24,
+            "full_name": "transact-rs/sqlx"
+          },
+          {
+            "id": 25,
+            "full_name": "rustls/rustls"
+          },
+          {
+            "id": 26,
+            "full_name": "bytecodealliance/wasmtime"
+          },
+          {
+            "id": 27,
+            "full_name": "wasm-bindgen/wasm-bindgen"
+          },
+          {
+            "id": 28,
+            "full_name": "gfx-rs/wgpu"
+          },
+          {
+            "id": 29,
+            "full_name": "rust-embedded/embedded-hal"
+          },
+          {
+            "id": 30,
+            "full_name": "embassy-rs/embassy"
+          },
+          {
+            "id": 31,
+            "full_name": "rust-lang/cc-rs"
+          },
+          {
+            "id": 32,
+            "full_name": "dtolnay/anyhow"
+          },
+          {
+            "id": 33,
+            "full_name": "dtolnay/thiserror"
+          },
+          {
+            "id": 34,
+            "full_name": "rwf2/Rocket"
+          },
+          {
+            "id": 35,
+            "full_name": "SeaQL/sea-orm"
+          },
+          {
+            "id": 36,
+            "full_name": "quinn-rs/quinn"
+          },
+          {
+            "id": 37,
+            "full_name": "libp2p/rust-libp2p"
+          },
+          {
+            "id": 38,
+            "full_name": "apache/datafusion"
+          },
+          {
+            "id": 39,
+            "full_name": "pola-rs/polars"
+          },
+          {
+            "id": 40,
+            "full_name": "quickwit-oss/tantivy"
+          },
+          {
+            "id": 41,
+            "full_name": "qdrant/qdrant"
+          },
+          {
+            "id": 42,
+            "full_name": "bevyengine/bevy"
+          },
+          {
+            "id": 43,
+            "full_name": "rust-windowing/winit"
+          },
+          {
+            "id": 44,
+            "full_name": "emilk/egui"
+          },
+          {
+            "id": 45,
+            "full_name": "iced-rs/iced"
+          },
+          {
+            "id": 46,
+            "full_name": "tauri-apps/tauri"
+          },
+          {
+            "id": 47,
+            "full_name": "DioxusLabs/dioxus"
+          },
+          {
+            "id": 48,
+            "full_name": "leptos-rs/leptos"
+          },
+          {
+            "id": 49,
+            "full_name": "nushell/nushell"
+          },
+          {
+            "id": 50,
+            "full_name": "BurntSushi/ripgrep"
+          }
+        ]
+      },
+      "selection_method": "lexicon",
+      "overlap_selections": 11324,
+      "corpus_high_watermark": 2278973
+    },
+    "created_at": "2026-09-17T14:05:54",
+    "updated_at": "2026-09-17T14:23:30",
+    "cleaning_version": "clean-v1",
+    "max_model_input_chars": 4000
+  },
+  "total_corpus": 73691,
+  "status_counts": {
+    "succeeded": 51092,
+    "failed": 57,
+    "not_attempted": 22542
+  },
+  "nonempty_succeeded": 42006,
+  "empty_succeeded": 9086,
+  "total_labels": 57894,
+  "aspect_sentiment": [
+    {
+      "aspect": "api_extensibility",
+      "sentiment": "negative",
+      "count": 1649
+    },
+    {
+      "aspect": "api_extensibility",
+      "sentiment": "neutral",
+      "count": 7437
+    },
+    {
+      "aspect": "api_extensibility",
+      "sentiment": "positive",
+      "count": 1133
+    },
+    {
+      "aspect": "community",
+      "sentiment": "negative",
+      "count": 144
+    },
+    {
+      "aspect": "community",
+      "sentiment": "neutral",
+      "count": 695
+    },
+    {
+      "aspect": "community",
+      "sentiment": "positive",
+      "count": 92
+    },
+    {
+      "aspect": "compile_time",
+      "sentiment": "negative",
+      "count": 865
+    },
+    {
+      "aspect": "compile_time",
+      "sentiment": "neutral",
+      "count": 862
+    },
+    {
+      "aspect": "compile_time",
+      "sentiment": "positive",
+      "count": 455
+    },
+    {
+      "aspect": "diagnostics_debugging",
+      "sentiment": "negative",
+      "count": 2187
+    },
+    {
+      "aspect": "diagnostics_debugging",
+      "sentiment": "neutral",
+      "count": 1782
+    },
+    {
+      "aspect": "diagnostics_debugging",
+      "sentiment": "positive",
+      "count": 376
+    },
+    {
+      "aspect": "learning_curve",
+      "sentiment": "negative",
+      "count": 273
+    },
+    {
+      "aspect": "learning_curve",
+      "sentiment": "neutral",
+      "count": 133
+    },
+    {
+      "aspect": "learning_curve",
+      "sentiment": "positive",
+      "count": 53
+    },
+    {
+      "aspect": "libraries_frameworks",
+      "sentiment": "negative",
+      "count": 1644
+    },
+    {
+      "aspect": "libraries_frameworks",
+      "sentiment": "neutral",
+      "count": 2877
+    },
+    {
+      "aspect": "libraries_frameworks",
+      "sentiment": "positive",
+      "count": 259
+    },
+    {
+      "aspect": "ownership",
+      "sentiment": "negative",
+      "count": 244
+    },
+    {
+      "aspect": "ownership",
+      "sentiment": "neutral",
+      "count": 1087
+    },
+    {
+      "aspect": "ownership",
+      "sentiment": "positive",
+      "count": 16
+    },
+    {
+      "aspect": "package_manager",
+      "sentiment": "negative",
+      "count": 1765
+    },
+    {
+      "aspect": "package_manager",
+      "sentiment": "neutral",
+      "count": 7146
+    },
+    {
+      "aspect": "package_manager",
+      "sentiment": "positive",
+      "count": 147
+    },
+    {
+      "aspect": "readability_maintainability",
+      "sentiment": "negative",
+      "count": 1110
+    },
+    {
+      "aspect": "readability_maintainability",
+      "sentiment": "neutral",
+      "count": 1105
+    },
+    {
+      "aspect": "readability_maintainability",
+      "sentiment": "positive",
+      "count": 1117
+    },
+    {
+      "aspect": "runtime_performance",
+      "sentiment": "negative",
+      "count": 1266
+    },
+    {
+      "aspect": "runtime_performance",
+      "sentiment": "neutral",
+      "count": 1874
+    },
+    {
+      "aspect": "runtime_performance",
+      "sentiment": "positive",
+      "count": 1291
+    },
+    {
+      "aspect": "safety",
+      "sentiment": "negative",
+      "count": 267
+    },
+    {
+      "aspect": "safety",
+      "sentiment": "neutral",
+      "count": 1320
+    },
+    {
+      "aspect": "safety",
+      "sentiment": "positive",
+      "count": 105
+    },
+    {
+      "aspect": "tooling_documentation",
+      "sentiment": "negative",
+      "count": 3914
+    },
+    {
+      "aspect": "tooling_documentation",
+      "sentiment": "neutral",
+      "count": 7738
+    },
+    {
+      "aspect": "tooling_documentation",
+      "sentiment": "positive",
+      "count": 490
+    },
+    {
+      "aspect": "type_system",
+      "sentiment": "negative",
+      "count": 405
+    },
+    {
+      "aspect": "type_system",
+      "sentiment": "neutral",
+      "count": 2490
+    },
+    {
+      "aspect": "type_system",
+      "sentiment": "positive",
+      "count": 81
+    }
+  ],
+  "scope": "Cumulative sample results for rust-aspects-v2 / aspect-sentiment-zh-v8 / glm-5.3-flash; not exclusive to one run",
+  "snapshot": {
+    "path": "data/exports/labeling-20260918T070456Z.sqlite3",
+    "bytes": 396767232,
+    "sha256": "117d5013425f633a13b9d74f3c91148759a95b5538cda72e1c548a51c5292179",
+    "counts": {
+      "corpus_sample_sets": 1,
+      "corpus_sample_items": 73691,
+      "repositories": 50,
+      "corpus": 73691,
+      "llm_annotations": 51149,
+      "lexicon_sample_hits": 97123,
+      "pipeline_runs": 1
+    },
+    "sample": "rust-all-aspects-v2-10k",
+    "snapshot_utc": "20260918T070456Z"
+  }
+}

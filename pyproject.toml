@@ -16,6 +16,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+api = [
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.30,<1",
+]
 dev = [
   "pytest>=8,<9",
   "pytest-cov>=5,<7",
@@ -29,7 +33,7 @@ topics = [
 [tool.setuptools]
 include-package-data = false
 py-modules = ["config", "pipeline", "taxonomy"]
-packages = ["corpus", "crawler", "lexicon", "llm_labeler", "bert_labeler", "storage", "topic_analysis"]
+packages = ["corpus", "crawler", "lexicon", "llm_labeler", "bert_labeler", "storage", "topic_analysis", "api"]
 
 [tool.setuptools.package-data]
 lexicon = ["rules/*.json"]

@@ -1,0 +1,17 @@
+[
+  {
+    "name": "annotations.jsonl.gz",
+    "bytes": 39674058,
+    "sha256": "fac03648836967ee21f3d867c2336290e0c4f75367997debc55178a479dab066"
+  },
+  {
+    "name": "lexicon_hits.jsonl.gz",
+    "bytes": 12035382,
+    "sha256": "e914556ee25bd92dda439900cc1387222f3fb354f2e4481c774a3f9dad4abac6"
+  },
+  {
+    "name": "summary.json",
+    "bytes": 34982,
+    "sha256": "99516fea1883bf525cbebec8e2be43a5ef526ebc4d048ceb8b1e84abfe8acf88"
+  }
+]

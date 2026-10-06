@@ -14,3 +14,8 @@ build/
 .vscode/
 data/topics/
 data/models/
+
+# Generated corpus exports remain local; scripts and summaries may be committed.
+data/exports/**/*.jsonl
+data/exports/**/*.jsonl.gz
+data/exports/**/annotations-preview-*.json

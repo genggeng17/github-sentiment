@@ -17,6 +17,7 @@ from storage.models import (
     PipelineRun,
     PullRequestComment,
     RepositoryCursor,
+    SentimentFact,
 )
 
 
@@ -148,6 +149,172 @@ def seed_sources(storage):
         ],
     )
     return repository_id
+
+
+def add_fact_annotation(storage, corpus_id, *, version="v1", updated_at=None,
+                        labels=None, status="succeeded"):
+    with storage.sessions.begin() as session:
+        annotation = LlmAnnotation(
+            corpus_id=corpus_id,
+            taxonomy_version="rust-aspects-v2",
+            prompt_version=version,
+            model_name="test-model",
+            status=status,
+            parsed_result={"annotations": labels if labels is not None else [
+                {"aspect": "compile_time", "class": "negative"}
+            ]},
+            updated_at=updated_at or datetime(2026, 1, 1),
+        )
+        session.add(annotation)
+        session.flush()
+        return annotation.id
+
+
+def fact_corpus(storage):
+    repository_id = seed_sources(storage)
+    CorpusBuilder(storage).build()
+    with storage.sessions() as session:
+        rows = session.scalars(select(Corpus).order_by(Corpus.id)).all()
+    return repository_id, rows
+
+
+def test_sentiment_facts_use_github_time_for_all_five_source_types(storage):
+    repository_id, rows = fact_corpus(storage)
+    for row in rows:
+        add_fact_annotation(storage, row.id, labels=[
+            {"aspect": "compile_time", "class": "negative"},
+            {"aspect": "tooling_documentation", "class": "positive"},
+        ])
+    stats = storage.refresh_sentiment_facts(batch_size=2)
+    assert stats == {"scanned_corpus": 5, "included_corpus": 5, "empty_corpus": 0, "rows": 10}
+    with storage.sessions() as session:
+        facts = session.scalars(select(SentimentFact)).all()
+    assert {fact.corpus_id for fact in facts} == {row.id for row in rows}
+    assert {fact.repository_id for fact in facts} == {repository_id}
+    assert {fact.created_at for fact in facts} == {datetime(2025, 1, 1)}
+    assert {row.source_type for row in rows} == {
+        "issue", "pull_request", "issue_comment", "pr_issue_comment", "pr_review_comment"
+    }
+    assert storage.refresh_sentiment_facts(batch_size=1) == stats
+    with storage.sessions() as session:
+        assert session.scalar(select(func.count()).select_from(SentimentFact)) == 10
+
+
+@pytest.mark.parametrize("versions", [1, 2, 3])
+def test_sentiment_facts_select_latest_successful_annotation(storage, versions):
+    _, rows = fact_corpus(storage)
+    corpus_id = rows[0].id
+    for version in reversed(range(versions)):
+        add_fact_annotation(
+            storage, corpus_id, version=f"v{version}",
+            updated_at=datetime(2026, 1, version + 1),
+            labels=[{"aspect": "compile_time", "class": "positive" if version == versions - 1
+                     else "negative"}],
+        )
+    add_fact_annotation(storage, corpus_id, version="failed-newest",
+                        updated_at=datetime(2026, 2, 1), status="failed")
+    stats = storage.refresh_sentiment_facts(batch_size=1)
+    assert stats["rows"] == 1
+    with storage.sessions() as session:
+        fact = session.scalars(select(SentimentFact)).one()
+    assert fact.sentiment == "positive"
+
+
+def test_sentiment_facts_break_timestamp_tie_by_annotation_id(storage):
+    _, rows = fact_corpus(storage)
+    add_fact_annotation(storage, rows[0].id)
+    add_fact_annotation(storage, rows[0].id, version="v2", labels=[
+        {"aspect": "ownership", "class": "neutral"}
+    ])
+    storage.refresh_sentiment_facts()
+    with storage.sessions() as session:
+        fact = session.scalars(select(SentimentFact)).one()
+    assert (fact.aspect, fact.sentiment) == ("ownership", "neutral")
+
+
+def test_sentiment_facts_latest_empty_annotation_removes_old_labels(storage):
+    _, rows = fact_corpus(storage)
+    add_fact_annotation(storage, rows[0].id)
+    storage.refresh_sentiment_facts()
+    add_fact_annotation(storage, rows[0].id, version="v2", labels=[],
+                        updated_at=datetime(2026, 2, 1))
+    add_fact_annotation(storage, rows[1].id, labels=[
+        {"aspect": "", "class": "negative"}, {"aspect": None}, {"aspect": "   "}, {}
+    ])
+    add_fact_annotation(storage, rows[2].id, status="failed")
+    stats = storage.refresh_sentiment_facts(batch_size=1)
+    assert stats == {"scanned_corpus": 2, "included_corpus": 0, "empty_corpus": 2, "rows": 0}
+    with storage.sessions() as session:
+        assert session.scalar(select(func.count()).select_from(SentimentFact)) == 0
+
+
+def test_sentiment_facts_refresh_reads_updated_existing_annotation(storage):
+    _, rows = fact_corpus(storage)
+    older_id = add_fact_annotation(storage, rows[0].id)
+    add_fact_annotation(storage, rows[0].id, version="v2", labels=[
+        {"aspect": "ownership", "class": "neutral"}
+    ])
+    storage.refresh_sentiment_facts()
+    with storage.sessions.begin() as session:
+        annotation = session.get(LlmAnnotation, older_id)
+        annotation.updated_at = datetime(2026, 2, 1)
+    storage.refresh_sentiment_facts()
+    with storage.sessions() as session:
+        fact = session.scalars(select(SentimentFact)).one()
+    assert fact.aspect == "compile_time"
+
+
+def test_sentiment_facts_refresh_rolls_back_when_source_is_missing(storage):
+    _, rows = fact_corpus(storage)
+    add_fact_annotation(storage, rows[0].id)
+    storage.refresh_sentiment_facts()
+    add_fact_annotation(storage, rows[1].id)
+    with storage.sessions.begin() as session:
+        session.get(Corpus, rows[1].id).source_id = 999999
+    with pytest.raises(RuntimeError, match="语料来源缺失"):
+        storage.refresh_sentiment_facts(batch_size=1)
+    with storage.sessions() as session:
+        facts = session.scalars(select(SentimentFact)).all()
+    assert [(fact.corpus_id, fact.aspect) for fact in facts] == [(rows[0].id, "compile_time")]
+
+
+@pytest.mark.parametrize("labels", [
+    [{"aspect": "compile_time", "class": "invalid"}],
+    [{"aspect": "compile_time", "class": "negative"},
+     {"aspect": "compile_time", "class": "positive"}],
+])
+def test_sentiment_facts_reject_invalid_labels(storage, labels):
+    _, rows = fact_corpus(storage)
+    add_fact_annotation(storage, rows[0].id, labels=labels)
+    with pytest.raises(ValueError):
+        storage.refresh_sentiment_facts()
+
+
+def test_sentiment_facts_cli_validates_batch_size():
+    from pipeline import build_parser
+
+    args = build_parser().parse_args(["refresh-sentiment-facts", "--batch-size", "200"])
+    assert args.batch_size == 200
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["refresh-sentiment-facts", "--batch-size", "0"])
+
+
+def test_sentiment_facts_cli_refreshes_and_records_run(storage, monkeypatch, capsys):
+    import json
+
+    import pipeline
+
+    _, rows = fact_corpus(storage)
+    add_fact_annotation(storage, rows[0].id)
+    monkeypatch.setattr(pipeline, "Storage", lambda _url: storage)
+    assert pipeline.main(["refresh-sentiment-facts", "--batch-size", "1"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "succeeded"
+    assert result["stats"]["rows"] == 1
+    with storage.sessions() as session:
+        run = session.get(PipelineRun, result["run_id"])
+        assert run.run_type == "refresh-sentiment-facts"
+        assert run.stats == result["stats"]
 
 
 def test_raw_upserts_are_idempotent(storage):
