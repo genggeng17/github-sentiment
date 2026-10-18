@@ -122,8 +122,10 @@ class _Backend:
             vectorizer_model=CountVectorizer(
                 stop_words=sorted(ENGLISH_STOP_WORDS | _DOMAIN_STOP_WORDS),
                 ngram_range=(1, 2),
-                min_df=2,
-                max_df=0.95,
+                # BERTopic fits this on aggregated topic documents. A sparse
+                # quarter may contain only one topic (all outliers included).
+                min_df=1,
+                max_df=1.0,
             ),
             calculate_probabilities=False,
             low_memory=True,
