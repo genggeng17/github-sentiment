@@ -1,4 +1,4 @@
-"""Aspect-specific BERTopic pilot analysis."""
+"""Quarterly pooled BERTopic analysis and the legacy aspect-specific pilot."""
 
 from .service import TopicAnalysis
 

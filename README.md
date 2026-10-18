@@ -5,12 +5,13 @@
 
 ```text
 GitHub 采集 → 清洗去重 → 普通/词典采样 → LLM 标注 → 抽检与训练数据准备
-                                                     → 方面内 BERTopic 分析
+                                                     → 按季度 BERTopic 分析
 ```
 
 已实现采集、清洗、采样、GLM/DeepSeek 标注、运行查询及 BERTopic 批次试验。
 已提供 `sentiment_facts` 查询表及只读 HTTP API，供并列的 `Developer-Voice` 前端使用。
 BERT/ONNX 目前仅预留接口，训练与自动推理尚未接入。
+Topic 默认合并全部方面，选择所有版本中每条语料最新的非空成功标注，按自然季度独立聚类并保存本地结果；旧方面模式通过 `--mode aspect` 保留。
 使用 Python ≥ 3.11、MySQL；部署目标为 Ubuntu 服务器。
 
 - [运行手册](docs/运行手册.md)：服务器运行与查询命令。

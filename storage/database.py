@@ -1242,6 +1242,104 @@ class Storage:
                 .order_by(SentimentFact.corpus_id, SentimentFact.aspect).limit(limit)
             ).mappings()]
 
+    def iter_latest_nonempty_topic_documents(
+        self, *, batch_size: int = 500
+    ) -> Iterator[list[dict[str, Any]]]:
+        """Latest nonempty successful annotation per corpus, across all versions.
+
+        Filter nonempty aspects before choosing the latest (updated_at, id).
+        Read annotations separately from corpus/source rows to avoid a large
+        JSON join and retain only one batch of selected documents in memory.
+        """
+        if batch_size < 1:
+            raise ValueError("batch_size 必须大于 0")
+        query = (
+            select(
+                LlmAnnotation.id.label("annotation_id"), LlmAnnotation.corpus_id,
+                LlmAnnotation.taxonomy_version, LlmAnnotation.prompt_version,
+                LlmAnnotation.model_name, LlmAnnotation.updated_at,
+                LlmAnnotation.parsed_result,
+            )
+            .where(LlmAnnotation.status == "succeeded")
+            .order_by(
+                LlmAnnotation.corpus_id, LlmAnnotation.updated_at.desc(),
+                LlmAnnotation.id.desc(),
+            )
+        )
+        selected = []
+        chosen_corpus_id = None
+        with self.engine.connect() as connection:
+            rows = connection.execution_options(yield_per=batch_size).execute(query).mappings()
+            try:
+                for row in rows:
+                    if row["corpus_id"] == chosen_corpus_id:
+                        continue
+                    payload = row["parsed_result"]
+                    labels = payload.get("annotations") if isinstance(payload, dict) else None
+                    nonempty = [
+                        item for item in labels or []
+                        if isinstance(item, dict) and isinstance(item.get("aspect"), str)
+                        and item["aspect"].strip()
+                    ] if isinstance(labels, list) else []
+                    if not nonempty:
+                        continue
+                    chosen_corpus_id = row["corpus_id"]
+                    selected.append({**row, "annotations": nonempty})
+                    if len(selected) >= batch_size:
+                        yield self._latest_topic_source_rows(selected)
+                        selected = []
+                if selected:
+                    yield self._latest_topic_source_rows(selected)
+            finally:
+                rows.close()
+
+    def _latest_topic_source_rows(self, selected: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        source_models = {
+            "issue": Issue, "pull_request": PullRequest, "issue_comment": IssueComment,
+            "pr_issue_comment": PullRequestComment, "pr_review_comment": PullRequestComment,
+        }
+        with self.sessions() as session:
+            corpora = {
+                row.id: row for row in session.scalars(
+                    select(Corpus).where(Corpus.id.in_([r["corpus_id"] for r in selected]))
+                )
+            }
+            metadata = {}
+            repository_ids = set()
+            for kind, model in source_models.items():
+                ids = [r.source_id for r in corpora.values() if r.source_type == kind]
+                if not ids:
+                    continue
+                for row in session.execute(select(
+                    model.id, model.repository_id, model.created_at, model.github_url,
+                ).where(model.id.in_(ids))).mappings():
+                    metadata[(kind, row["id"])] = row
+                    repository_ids.add(row["repository_id"])
+            repositories = dict(session.execute(select(
+                Repository.id, Repository.full_name,
+            ).where(Repository.id.in_(repository_ids))).all())
+            result = []
+            for annotation in selected:
+                corpus = corpora.get(annotation["corpus_id"])
+                if corpus is None or (corpus.source_type, corpus.source_id) not in metadata:
+                    raise RuntimeError(f"季度 topic 语料来源缺失: {annotation['corpus_id']}")
+                source = metadata[(corpus.source_type, corpus.source_id)]
+                result.append({
+                    "corpus_id": corpus.id, "source_type": corpus.source_type,
+                    "source_id": corpus.source_id, "parent_id": corpus.parent_id,
+                    "content_hash": corpus.content_hash, "clean_text": corpus.clean_text,
+                    "cleaning_version": corpus.cleaning_version, "language": corpus.language,
+                    "repository": repositories[source["repository_id"]],
+                    "created_at": source["created_at"], "github_url": source["github_url"],
+                    "annotation_id": annotation["annotation_id"],
+                    "annotation_updated_at": annotation["updated_at"],
+                    "taxonomy_version": annotation["taxonomy_version"],
+                    "prompt_version": annotation["prompt_version"],
+                    "model_name": annotation["model_name"],
+                    "annotations": annotation["annotations"],
+                })
+        return result
+
     def iter_confirmed_topic_documents(
         self,
         *,

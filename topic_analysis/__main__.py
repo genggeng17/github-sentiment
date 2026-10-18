@@ -14,6 +14,7 @@ from llm_labeler.prompts import PROMPT_VERSION
 from storage import Storage
 from taxonomy import ASPECTS, TAXONOMY_VERSION
 
+from .quarterly import QuarterlyTopicAnalysis
 from .service import TopicAnalysis
 
 
@@ -28,13 +29,14 @@ def positive_int(value: str) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="按已确认的 Aspect 运行 BERTopic")
+    parser = argparse.ArgumentParser(description="按自然季度汇总非空方面标注并运行 BERTopic")
     parser.add_argument("action", choices=["inspect", "fit"])
-    parser.add_argument("--model-name", required=True, help="llm_annotations.model_name")
+    parser.add_argument("--mode", choices=["quarterly", "aspect"], default="quarterly")
+    parser.add_argument("--model-name", help="仅用于旧 aspect 模式")
     parser.add_argument("--prompt-version", default=PROMPT_VERSION)
     parser.add_argument("--taxonomy-version", default=TAXONOMY_VERSION)
-    parser.add_argument("--cleaning-version", required=True)
-    parser.add_argument("--language", choices=["en"], default="en")
+    parser.add_argument("--cleaning-version", help="仅用于旧 aspect 模式")
+    parser.add_argument("--language", choices=["en"], help="仅用于旧 aspect 模式，默认 en")
     parser.add_argument("--aspect", action="append", choices=sorted(ASPECTS))
     parser.add_argument("--embedding-model", default="sentence-transformers/all-MiniLM-L6-v2")
     parser.add_argument("--embedding-batch-size", type=positive_int, default=32)
@@ -50,18 +52,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-root", type=Path, default=Path("data/topics"))
     parser.add_argument("--name", help="inspect 快照名或 fit 运行名；默认使用 UTC 时间戳")
     parser.add_argument("--snapshot", help="fit 要读取的 inspect 快照名")
+    parser.add_argument("--resume", action="store_true", help="恢复已有季度运行，复用已完成季度")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.mode == "aspect" and (not args.model_name or not args.cleaning_version):
+        parser.error("aspect 模式必须指定 --model-name 和 --cleaning-version")
+    if args.mode == "quarterly" and (
+        args.model_name or args.cleaning_version or args.aspect or args.max_docs_per_aspect
+        or args.language
+        or args.prompt_version != PROMPT_VERSION or args.taxonomy_version != TAXONOMY_VERSION
+    ):
+        parser.error("quarterly 模式读取所有版本且不分方面，不能指定模型/版本/方面筛选或抽样")
+    if args.resume and (args.mode != "quarterly" or args.action != "fit"):
+        parser.error("--resume 只用于季度 fit")
     if args.action == "fit" and not args.snapshot:
         parser.error("fit 必须指定 --snapshot，即 inspect 输出的 snapshot_name")
     if args.action == "inspect" and args.snapshot:
         parser.error("--snapshot 只用于 fit")
     if args.umap_neighbors < 2:
         raise ValueError("--umap-neighbors 必须至少为 2")
+    if args.min_topic_size < 2:
+        parser.error("--min-topic-size 必须至少为 2")
+    if args.min_chars > args.max_chars:
+        parser.error("--min-chars 不能大于 --max-chars")
     topic_logger = logging.getLogger("topic_analysis")
     if not any(handler.name == "topic_analysis_cli" for handler in topic_logger.handlers):
         handler = logging.StreamHandler(sys.stderr)
@@ -75,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
         "prompt_version": args.prompt_version,
         "model_name": args.model_name,
         "cleaning_version": args.cleaning_version,
-        "language": args.language,
+        "language": args.language or "en",
         "aspects": sorted(set(args.aspect or ASPECTS)),
         "embedding_model": args.embedding_model,
         "embedding_batch_size": args.embedding_batch_size,
@@ -89,10 +106,17 @@ def main(argv: list[str] | None = None) -> int:
         "umap_neighbors": args.umap_neighbors,
         "seed": args.seed,
     }
+    if args.mode == "quarterly":
+        config = {key: config[key] for key in (
+            "embedding_model", "embedding_batch_size", "cpu_threads", "max_chars", "min_chars",
+            "min_documents", "min_topic_size", "min_samples", "umap_neighbors", "seed",
+        )}
     repo_root = Path(__file__).resolve().parents[1]
     if args.action == "inspect":
         storage = Storage(Settings.from_env().database_url)
-        analysis = TopicAnalysis(storage, repo_root)
+        analysis = (QuarterlyTopicAnalysis if args.mode == "quarterly" else TopicAnalysis)(
+            storage, repo_root,
+        )
         snapshot_name = args.name or datetime.now(UTC).strftime("corpus-%Y%m%dT%H%M%SZ")
         with storage.pipeline_lock():
             result = analysis.inspect(
@@ -100,11 +124,15 @@ def main(argv: list[str] | None = None) -> int:
             )
     else:
         run_name = args.name or datetime.now(UTC).strftime("bertopic-%Y%m%dT%H%M%SZ")
-        result = TopicAnalysis(None, repo_root).fit(
+        analysis = (QuarterlyTopicAnalysis if args.mode == "quarterly" else TopicAnalysis)(
+            None, repo_root,
+        )
+        result = analysis.fit(
             config,
             output_root=args.output_root,
             run_name=run_name,
             snapshot_name=args.snapshot,
+            **({"resume": args.resume} if args.mode == "quarterly" else {}),
         )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
